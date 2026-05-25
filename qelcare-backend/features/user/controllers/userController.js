@@ -1,0 +1,392 @@
+const User = require("../models/User");
+const pool = require("../../../config/database");
+const logger = require("../../../shared/utils/activityLogger");
+
+const VALID_STATUSES = ["verified", "unverified", "locked", "deactivated"];
+const VALID_GENDERS = ["", null, undefined, "Male", "Female", "Other"];
+
+async function roleExists(roleId) {
+  const result = await pool.query("SELECT role_id FROM roles WHERE role_id = $1", [roleId]);
+  return result.rowCount > 0;
+}
+
+async function specialtyExists(specialtyId) {
+  if (!specialtyId) return true;
+  const result = await pool.query("SELECT specialty_id FROM specialties WHERE specialty_id = $1", [specialtyId]);
+  return result.rowCount > 0;
+}
+
+async function getRoleName(roleId) {
+  const result = await pool.query("SELECT role_name FROM roles WHERE role_id = $1", [roleId]);
+  return result.rows[0]?.role_name || null;
+}
+
+async function getAuditUser(userId) {
+  const result = await pool.query(
+    `SELECT
+       u.user_id,
+       u.username,
+       u.email,
+       u.first_name,
+       u.last_name,
+       u.role_id,
+       u.status,
+       r.role_name
+     FROM users u
+     LEFT JOIN roles r ON u.role_id = r.role_id
+     WHERE u.user_id = $1`,
+    [userId]
+  );
+  return result.rows[0] || null;
+}
+
+function displayName(user) {
+  if (!user) return "Unknown user";
+  const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  return name || user.username || `User #${user.user_id}`;
+}
+
+function changedFields(before, after, fields) {
+  if (!before || !after) return fields;
+  return fields.filter((field) => String(before[field] || "") !== String(after[field] || ""));
+}
+
+async function writeLog(req, payload) {
+  await logger.log({
+    userId: req.user?.user_id || null,
+    ip: logger.getIP(req),
+    ...payload,
+  });
+}
+
+const getProfile = async (req, res) => {
+  try {
+    const profile = await User.getProfile(req.user.user_id);
+    if (!profile) return res.status(404).json({ success: false, message: "User not found" });
+    res.status(200).json({ success: true, data: profile });
+  } catch (error) {
+    console.error("getProfile error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch profile" });
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const before = await User.getProfile(req.user.user_id);
+    if (!before) return res.status(404).json({ success: false, message: "User not found" });
+
+    const email = req.body.email ? String(req.body.email).trim().toLowerCase() : "";
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Invalid email address" });
+    }
+
+    if (!VALID_GENDERS.includes(req.body.gender)) {
+      return res.status(400).json({ success: false, message: "Invalid gender" });
+    }
+
+    if (!req.body.first_name || !req.body.last_name) {
+      return res.status(400).json({
+        success: false,
+        message: "First name and last name are required",
+      });
+    }
+
+    const updated = await User.updateProfile(req.user.user_id, {
+      ...req.body,
+      email: email || null,
+    });
+
+    if (!updated) return res.status(404).json({ success: false, message: "User not found" });
+
+    const fields = changedFields(before, updated, [
+      "first_name",
+      "last_name",
+      "middle_name",
+      "suffix",
+      "email",
+      "phone",
+      "alternate_phone",
+      "gender",
+      "date_of_birth",
+      "region_code",
+      "province_code",
+      "municipality_code",
+      "barangay_code",
+      "address_line",
+    ]);
+
+    await writeLog(req, {
+      action: "PROFILE_UPDATED",
+      entityType: "user",
+      entityId: req.user.user_id,
+      description: `${displayName(updated)} updated their profile.`,
+      metadata: {
+        user_id: req.user.user_id,
+        changed_fields: fields,
+      },
+    });
+
+    res.status(200).json({ success: true, message: "Profile updated", data: updated });
+  } catch (error) {
+    console.error("updateProfile error:", error);
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.status ? error.message : "Failed to update profile",
+    });
+  }
+};
+
+const getAllUsers = async (_req, res) => {
+  try {
+    const users = await User.getAllUsers();
+    res.status(200).json({ success: true, data: users });
+  } catch (error) {
+    console.error("getAllUsers error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch users" });
+  }
+};
+
+const getDoctors = async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         u.user_id,
+         u.username,
+         u.email,
+         u.first_name,
+         u.last_name,
+         NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '') AS doctor_name,
+         u.phone,
+         u.gender,
+         u.specialty_id,
+         s.specialty_name,
+         s.slug AS specialty_slug
+       FROM users u
+       JOIN roles r ON u.role_id = r.role_id
+       LEFT JOIN specialties s ON u.specialty_id = s.specialty_id
+       WHERE r.role_name = 'Doctor'
+         AND u.status = 'verified'
+         AND u.specialty_id IS NOT NULL
+         AND COALESCE(s.is_active, true) = true
+       ORDER BY COALESCE(s.display_order, 999), s.specialty_name, u.last_name, u.first_name`
+    );
+
+    res.status(200).json({
+      success: true,
+      data: result.rows,
+      doctors: result.rows,
+    });
+  } catch (error) {
+    console.error("getDoctors error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch doctors" });
+  }
+};
+
+const createUser = async (req, res) => {
+  try {
+    const {
+      username,
+      email,
+      password,
+      first_name,
+      last_name,
+      role_id,
+      specialty_id,
+      phone,
+      gender,
+    } = req.body;
+
+    if (!username || !email || !password || !first_name || !last_name || !role_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Username, email, password, first name, last name, and role are required",
+      });
+    }
+
+    if (!(await roleExists(role_id))) {
+      return res.status(400).json({ success: false, message: "Invalid role" });
+    }
+    if (!(await specialtyExists(specialty_id))) {
+      return res.status(400).json({ success: false, message: "Invalid specialty" });
+    }
+
+    const existing = await pool.query(
+      "SELECT user_id FROM users WHERE username = $1 OR LOWER(email) = LOWER($2)",
+      [username, email]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ success: false, message: "Username or email already taken" });
+    }
+
+    const newUser = await User.createUser({
+      username,
+      email,
+      password,
+      first_name,
+      last_name,
+      role_id,
+      specialty_id: specialty_id || null,
+      phone,
+      gender,
+    });
+
+    const roleName = await getRoleName(role_id);
+    await writeLog(req, {
+      action: "USER_CREATED",
+      entityType: "user",
+      entityId: newUser.user_id,
+      description: `Created user account for ${displayName(newUser)}${roleName ? ` as ${roleName}` : ""}.`,
+      metadata: {
+        created_user_id: newUser.user_id,
+        username: newUser.username,
+        email: newUser.email,
+        role_id: Number(role_id),
+        role_name: roleName,
+        specialty_id: specialty_id ? Number(specialty_id) : null,
+        status: newUser.status,
+      },
+    });
+
+    res.status(201).json({ success: true, message: "User created successfully", data: newUser });
+  } catch (error) {
+    console.error("createUser error:", error);
+    res.status(500).json({ success: false, message: "Failed to create user" });
+  }
+};
+
+const updateUserStatus = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { status } = req.body;
+
+    if (!VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid status" });
+    }
+
+    const before = await getAuditUser(userId);
+    const updated = await User.updateStatus(userId, status);
+    if (!updated) return res.status(404).json({ success: false, message: "User not found" });
+
+    await writeLog(req, {
+      action: "USER_STATUS_CHANGED",
+      entityType: "user",
+      entityId: Number(userId),
+      description: `Changed ${displayName(before)} status from ${before?.status || "unknown"} to ${status}.`,
+      metadata: {
+        target_user_id: Number(userId),
+        previous_status: before?.status || null,
+        new_status: status,
+      },
+    });
+
+    res.status(200).json({ success: true, message: `User status updated to ${status}`, data: updated });
+  } catch (error) {
+    console.error("updateUserStatus error:", error);
+    res.status(500).json({ success: false, message: "Failed to update status" });
+  }
+};
+
+const updateUserRole = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { role_id } = req.body;
+
+    if (!role_id) return res.status(400).json({ success: false, message: "role_id is required" });
+    if (!(await roleExists(role_id))) {
+      return res.status(400).json({ success: false, message: "Invalid role" });
+    }
+
+    const before = await getAuditUser(userId);
+    const updated = await User.updateRole(userId, role_id);
+    if (!updated) return res.status(404).json({ success: false, message: "User not found" });
+
+    const newRoleName = await getRoleName(role_id);
+    await writeLog(req, {
+      action: "USER_ROLE_CHANGED",
+      entityType: "user",
+      entityId: Number(userId),
+      description: `Changed ${displayName(before)} role from ${before?.role_name || "unknown"} to ${newRoleName || `role #${role_id}`}.`,
+      metadata: {
+        target_user_id: Number(userId),
+        previous_role_id: before?.role_id || null,
+        previous_role_name: before?.role_name || null,
+        new_role_id: Number(role_id),
+        new_role_name: newRoleName,
+      },
+    });
+
+    res.status(200).json({ success: true, message: "User role updated", data: updated });
+  } catch (error) {
+    console.error("updateUserRole error:", error);
+    res.status(500).json({ success: false, message: "Failed to update role" });
+  }
+};
+
+const updateUserDetails = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { phone, gender, specialty_id } = req.body;
+
+    if (!VALID_GENDERS.includes(gender)) {
+      return res.status(400).json({ success: false, message: "Invalid gender" });
+    }
+    if (!(await specialtyExists(specialty_id))) {
+      return res.status(400).json({ success: false, message: "Invalid specialty" });
+    }
+
+    const before = await getAuditUser(userId);
+    const details = {};
+    if (Object.prototype.hasOwnProperty.call(req.body, "phone")) {
+      details.phone = typeof phone === "string" ? phone.trim() : phone;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, "gender")) {
+      details.gender = gender || null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, "specialty_id")) {
+      details.specialty_id = specialty_id || null;
+    }
+
+    const updated = await User.updateAdminDetails(userId, details);
+    if (!updated) return res.status(404).json({ success: false, message: "User not found" });
+
+    await writeLog(req, {
+      action: "USER_DETAILS_UPDATED",
+      entityType: "user",
+      entityId: Number(userId),
+      description: `Updated contact details for ${displayName(before)}.`,
+      metadata: {
+        target_user_id: Number(userId),
+        phone_updated: Object.prototype.hasOwnProperty.call(req.body, "phone"),
+        gender_updated: Object.prototype.hasOwnProperty.call(req.body, "gender"),
+        specialty_updated: Object.prototype.hasOwnProperty.call(req.body, "specialty_id"),
+      },
+    });
+
+    res.status(200).json({ success: true, message: "User details updated", data: updated });
+  } catch (error) {
+    console.error("updateUserDetails error:", error);
+    res.status(500).json({ success: false, message: "Failed to update user details" });
+  }
+};
+
+const getRoles = async (_req, res) => {
+  try {
+    const result = await pool.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+    res.status(200).json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("getRoles error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch roles" });
+  }
+};
+
+module.exports = {
+  getProfile,
+  updateProfile,
+  getAllUsers,
+  getDoctors,
+  createUser,
+  updateUserStatus,
+  updateUserRole,
+  updateUserDetails,
+  getRoles,
+};

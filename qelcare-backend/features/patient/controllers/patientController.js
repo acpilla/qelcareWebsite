@@ -1,0 +1,158 @@
+const Patient = require("../models/Patient");
+const logger = require("../../../shared/utils/activityLogger");
+
+function getPatientName(patient) {
+  return patient.display_name || patient.name || [patient.first_name, patient.last_name].filter(Boolean).join(" ");
+}
+
+const patientController = {
+  async create(req, res) {
+    try {
+      const firstName = String(req.body.first_name || "").trim();
+      const lastName = String(req.body.last_name || "").trim();
+      const legacyName = String(req.body.name || "").trim();
+
+      if ((!firstName || !lastName) && !legacyName) {
+        return res.status(400).json({
+          success: false,
+          message: "First name and last name are required.",
+        });
+      }
+
+      const patient = await Patient.create({
+        ...req.body,
+        created_by: req.user.user_id,
+      });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "PATIENT_CREATED",
+        entityType: "patient",
+        entityId: patient.id,
+        description: `Patient created: ${getPatientName(patient)}`,
+        ip: logger.getIP(req),
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Patient created.",
+        data: patient,
+        patient,
+      });
+    } catch (err) {
+      console.error("Create patient error:", err);
+      res.status(500).json({ success: false, message: "Failed to create patient." });
+    }
+  },
+
+  async getAll(req, res) {
+    try {
+      const { search = "", is_active } = req.query;
+      const activeFilter = is_active === undefined || is_active === "" ? null : is_active === "true";
+      const patients = await Patient.findAll({ search, is_active: activeFilter });
+
+      res.json({
+        success: true,
+        data: patients,
+        patients,
+      });
+    } catch (err) {
+      console.error("Get patients error:", err);
+      res.status(500).json({ success: false, message: "Failed to fetch patients." });
+    }
+  },
+
+  async getById(req, res) {
+    try {
+      const patient = await Patient.findById(req.params.id);
+      if (!patient) return res.status(404).json({ success: false, message: "Patient not found." });
+      res.json({ success: true, data: patient, patient });
+    } catch (err) {
+      console.error("Get patient error:", err);
+      res.status(500).json({ success: false, message: "Failed to fetch patient." });
+    }
+  },
+
+  async getMyPatientProfile(req, res) {
+    try {
+      const patient = await Patient.findByUserId(req.user.user_id);
+      if (!patient) {
+        return res.status(404).json({ success: false, message: "Patient profile not found." });
+      }
+      res.json({ success: true, data: patient, patient });
+    } catch (err) {
+      console.error("Get my patient profile error:", err);
+      res.status(500).json({ success: false, message: "Failed to fetch patient profile." });
+    }
+  },
+
+  async update(req, res) {
+    try {
+      const firstName = String(req.body.first_name || "").trim();
+      const lastName = String(req.body.last_name || "").trim();
+      const legacyName = String(req.body.name || "").trim();
+
+      if ((!firstName || !lastName) && !legacyName) {
+        return res.status(400).json({
+          success: false,
+          message: "First name and last name are required.",
+        });
+      }
+
+      const patient = await Patient.update(req.params.id, req.body);
+      if (!patient) return res.status(404).json({ success: false, message: "Patient not found." });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "PATIENT_UPDATED",
+        entityType: "patient",
+        entityId: patient.id,
+        description: `Patient updated: ${getPatientName(patient)}`,
+        ip: logger.getIP(req),
+      });
+
+      res.json({
+        success: true,
+        message: "Patient updated.",
+        data: patient,
+        patient,
+      });
+    } catch (err) {
+      console.error("Update patient error:", err);
+      res.status(500).json({ success: false, message: "Failed to update patient." });
+    }
+  },
+
+  async setActive(req, res) {
+    try {
+      const { is_active } = req.body;
+      if (typeof is_active !== "boolean") {
+        return res.status(400).json({ success: false, message: "is_active must be true or false." });
+      }
+
+      const patient = await Patient.setActive(req.params.id, is_active);
+      if (!patient) return res.status(404).json({ success: false, message: "Patient not found." });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "PATIENT_STATUS_CHANGED",
+        entityType: "patient",
+        entityId: patient.id,
+        description: `Patient ${is_active ? "activated" : "deactivated"}: ${getPatientName(patient)}`,
+        ip: logger.getIP(req),
+      });
+
+      res.json({
+        success: true,
+        message: `Patient ${is_active ? "activated" : "deactivated"}.`,
+        data: patient,
+        patient,
+      });
+    } catch (err) {
+      console.error("Set active error:", err);
+      res.status(500).json({ success: false, message: "Failed to update patient status." });
+    }
+  },
+};
+
+module.exports = patientController;

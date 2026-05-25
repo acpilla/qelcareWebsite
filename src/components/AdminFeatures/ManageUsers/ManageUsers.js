@@ -1,0 +1,803 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import MainLayout from "../../Layout/MainLayout";
+import { API_URL, authFetch, getToken } from "../../../utils/auth";
+
+const STATUS_OPTIONS = [
+  { value: "verified", label: "Active" },
+  { value: "unverified", label: "Unverified" },
+  { value: "locked", label: "Locked" },
+  { value: "deactivated", label: "Deactivated" },
+];
+
+const C = {
+  navy: "#0f2744",
+  blue: "#163a6b",
+  blue2: "#1f4e8c",
+  muted: "#8a97a8",
+  text: "#5a6a7e",
+  border: "#e8eef6",
+  soft: "#f8fafd",
+  bg: "#f0f4f9",
+  ok: "#1f8a5b",
+  warn: "#a56a00",
+  danger: "#b63342",
+};
+
+function statusLabel(status) {
+  return {
+    verified: { label: "Active", bg: "#dff5e7", color: "#1f8a5b" },
+    unverified: { label: "Unverified", bg: "#fff4de", color: "#a56a00" },
+    locked: { label: "Locked", bg: "#ffe5e8", color: "#b63342" },
+    deactivated: { label: "Deactivated", bg: "#f2f2f2", color: "#666" },
+  }[status] || { label: status || "Unknown", bg: "#eee", color: "#333" };
+}
+
+function formatDate(value, withTime = false) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+  return date.toLocaleString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+  });
+}
+
+function getFullName(user) {
+  return [user?.first_name, user?.last_name].filter(Boolean).join(" ") || user?.username || "User";
+}
+
+function getProfilePicUrl(user) {
+  if (!user?.profile_picture) return null;
+  if (user.profile_picture.startsWith("http")) return user.profile_picture;
+  return `${API_URL}${user.profile_picture}`;
+}
+
+function decodeUserIdFromToken() {
+  try {
+    const token = getToken();
+    if (!token) return null;
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.user_id || payload.user?.user_id || null;
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentUserId() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("user") || "{}");
+    return stored.user_id || decodeUserIdFromToken();
+  } catch {
+    return decodeUserIdFromToken();
+  }
+}
+
+async function parseApiResponse(response) {
+  if (!response) throw new Error("Request was not completed");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.message || "Request failed");
+  }
+  return data;
+}
+
+async function uploadProfilePhoto(userId, file) {
+  const form = new FormData();
+  form.append("profilePicture", file);
+
+  const token = getToken();
+  const response = await fetch(`${API_URL}/users/${userId}/profile-picture`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.message || "Profile photo upload failed");
+  }
+  return data;
+}
+
+function UserAvatar({ user, size = 56 }) {
+  const [imgError, setImgError] = useState(false);
+  const profileUrl = getProfilePicUrl(user);
+  const initials = (() => {
+    if (user?.first_name && user?.last_name) return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();
+    if (user?.username) return user.username.slice(0, 2).toUpperCase();
+    return "U";
+  })();
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        overflow: "hidden",
+        background: "linear-gradient(135deg,#163a6b,#1f4e8c)",
+        color: "#fff",
+        display: "grid",
+        placeItems: "center",
+        fontSize: Math.round(size * 0.34),
+        fontWeight: 800,
+        border: "3px solid #fff",
+        boxShadow: "0 2px 8px rgba(15,23,42,.14)",
+        flexShrink: 0,
+      }}
+    >
+      {profileUrl && !imgError ? (
+        <img
+          src={profileUrl}
+          alt={user?.username || "User"}
+          onError={() => setImgError(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      ) : (
+        initials
+      )}
+    </div>
+  );
+}
+
+function Badge({ children, bg, color }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "5px 11px",
+        borderRadius: 999,
+        background: bg,
+        color,
+        fontSize: 12,
+        fontWeight: 800,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Button({ children, variant = "secondary", disabled, onClick, type = "button" }) {
+  const primary = variant === "primary";
+  const danger = variant === "danger";
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        height: 38,
+        padding: "0 14px",
+        borderRadius: 10,
+        border: primary || danger ? "none" : `1px solid ${C.border}`,
+        background: danger ? C.danger : primary ? C.blue : "#fff",
+        color: primary || danger ? "#fff" : C.blue,
+        fontSize: 13,
+        fontWeight: 800,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        fontFamily: "inherit",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function UserCard({ user, currentUserId, onView, onEdit, onRemove }) {
+  const st = statusLabel(user.status);
+  const isCurrentUser = Number(user.user_id) === Number(currentUserId);
+
+  return (
+    <article
+      style={{
+        background: "#fff",
+        border: `1px solid ${C.border}`,
+        borderRadius: 14,
+        padding: 18,
+        boxShadow: "0 2px 10px rgba(15,23,42,.06)",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <UserAvatar user={user} size={64} />
+        <Badge bg={st.bg} color={st.color}>{st.label}</Badge>
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 900, color: C.navy, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {user.username || "No username"}
+          </div>
+          {isCurrentUser && <Badge bg={C.blue} color="#fff">You</Badge>}
+        </div>
+        <div style={{ fontSize: 13, color: C.text, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {user.email || "No email"}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 14, padding: "12px 0", borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`, display: "grid", gap: 8 }}>
+        <InfoRow label="Name" value={getFullName(user)} />
+        <InfoRow label="Role" value={user.role || "Unassigned"} />
+        <InfoRow label="Phone" value={user.phone || "Not set"} />
+        <InfoRow label="Gender" value={user.gender || "Not set"} />
+        <InfoRow label="Joined" value={formatDate(user.created_at)} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <Button onClick={() => onView(user)}>View</Button>
+        <Button onClick={() => onEdit(user)} disabled={isCurrentUser}>Edit</Button>
+        <Button variant="danger" onClick={() => onRemove(user)} disabled={isCurrentUser || user.status === "deactivated"}>
+          Remove
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+      <span style={{ color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</span>
+      <span style={{ color: C.navy, fontWeight: 700, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</span>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label style={{ display: "grid", gap: 7, fontSize: 13, fontWeight: 800, color: C.navy }}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+const inputStyle = {
+  height: 42,
+  border: `1px solid ${C.border}`,
+  borderRadius: 10,
+  padding: "0 12px",
+  background: "#fff",
+  color: C.navy,
+  fontSize: 14,
+  fontFamily: "inherit",
+  outline: "none",
+  minWidth: 0,
+};
+
+function UserModal({ user, roles, mode, onClose, onSave, saving }) {
+  const isEdit = !!user && mode === "edit";
+  const isView = !!user && mode === "view";
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState(() => ({
+    username: user?.username || "",
+    email: user?.email || "",
+    first_name: user?.first_name || "",
+    last_name: user?.last_name || "",
+    phone: user?.phone || "",
+    gender: user?.gender || "",
+    role_id: user?.role_id || "",
+    status: user?.status || "verified",
+    password: "",
+  }));
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const submit = (event) => {
+    event.preventDefault();
+    setError("");
+
+    if (isEdit) {
+      const updates = {};
+      if (String(form.role_id) !== String(user.role_id || "")) updates.role_id = Number(form.role_id);
+      if (form.status !== user.status) updates.status = form.status;
+      if (!Object.keys(updates).length) {
+        setError("No role or status changes detected.");
+        return;
+      }
+      onSave(updates, null);
+      return;
+    }
+
+    if (!form.username || !form.email || !form.first_name || !form.last_name || !form.role_id || !form.password) {
+      setError("Username, email, first name, last name, role, and password are required.");
+      return;
+    }
+
+    onSave(
+      {
+        username: form.username.trim(),
+        email: form.email.trim(),
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        phone: form.phone.trim() || null,
+        gender: form.gender || null,
+        role_id: Number(form.role_id),
+        password: form.password,
+      },
+      file
+    );
+  };
+
+  return (
+    <div
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 500,
+        background: "rgba(10,20,35,.58)",
+        display: "grid",
+        placeItems: "center",
+        padding: 22,
+      }}
+    >
+      <div style={{ width: "min(720px, 100%)", maxHeight: "88vh", overflow: "hidden", background: "#fff", borderRadius: 16, boxShadow: "0 24px 70px rgba(15,23,42,.28)" }}>
+        <div style={{ padding: "18px 22px", background: C.blue, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900 }}>{isView ? "View User" : isEdit ? "Edit User" : "Add User"}</div>
+            <div style={{ fontSize: 12, opacity: 0.78, marginTop: 3 }}>{user?.email || "Create a backend-synced account"}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: 8, border: "none", background: "rgba(255,255,255,.12)", color: "#fff", cursor: "pointer", fontSize: 22 }}>
+            x
+          </button>
+        </div>
+
+        <div style={{ padding: 24, background: "#fafbfd", maxHeight: "calc(88vh - 74px)", overflowY: "auto" }}>
+          {error && (
+            <div style={{ marginBottom: 16, padding: "12px 14px", borderRadius: 10, background: "#fff2f4", color: C.danger, border: "1px solid #f7c5cb", fontSize: 13, fontWeight: 700 }}>
+              {error}
+            </div>
+          )}
+
+          {isView ? (
+            <div style={{ display: "grid", gap: 18 }}>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
+                <UserAvatar user={user} size={76} />
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: C.navy }}>{getFullName(user)}</div>
+                  <div style={{ color: C.text, marginTop: 4 }}>{user.username} / {user.email}</div>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
+                <ReadOnly label="Role" value={user.role || "Unassigned"} />
+                <ReadOnly label="Status" value={statusLabel(user.status).label} />
+                <ReadOnly label="Phone" value={user.phone || "Not set"} />
+                <ReadOnly label="Gender" value={user.gender || "Not set"} />
+                <ReadOnly label="Joined" value={formatDate(user.created_at, true)} />
+                <ReadOnly label="Last Login" value={formatDate(user.last_login, true)} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <Button onClick={onClose}>Close</Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={submit} style={{ display: "grid", gap: 18 }}>
+              {!isEdit && (
+                <div style={{ background: "#fff", border: `1px dashed ${C.border}`, borderRadius: 14, padding: 16 }}>
+                  <Field label="Profile Photo Optional">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) => setFile(event.target.files?.[0] || null)}
+                      style={{ ...inputStyle, height: "auto", padding: 10 }}
+                    />
+                  </Field>
+                  {file && <div style={{ fontSize: 12, color: C.text, marginTop: 8 }}>{file.name}</div>}
+                </div>
+              )}
+
+              <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 16 }}>
+                {!isEdit && (
+                  <Field label="Username">
+                    <input name="username" value={form.username} onChange={handleChange} style={inputStyle} />
+                  </Field>
+                )}
+                <Field label="First Name">
+                  <input name="first_name" value={form.first_name} onChange={handleChange} disabled={isEdit} style={{ ...inputStyle, opacity: isEdit ? 0.7 : 1 }} />
+                </Field>
+                <Field label="Last Name">
+                  <input name="last_name" value={form.last_name} onChange={handleChange} disabled={isEdit} style={{ ...inputStyle, opacity: isEdit ? 0.7 : 1 }} />
+                </Field>
+                <Field label="Email">
+                  <input name="email" type="email" value={form.email} onChange={handleChange} disabled={isEdit} style={{ ...inputStyle, opacity: isEdit ? 0.7 : 1 }} />
+                </Field>
+                <Field label="Phone">
+                  <input name="phone" value={form.phone} onChange={handleChange} disabled={isEdit} style={{ ...inputStyle, opacity: isEdit ? 0.7 : 1 }} />
+                </Field>
+                <Field label="Gender">
+                  <select name="gender" value={form.gender} onChange={handleChange} disabled={isEdit} style={{ ...inputStyle, opacity: isEdit ? 0.7 : 1 }}>
+                    <option value="">Not set</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </Field>
+                <Field label="Role">
+                  <select name="role_id" value={form.role_id} onChange={handleChange} style={inputStyle}>
+                    <option value="">Select role</option>
+                    {roles.map((role) => (
+                      <option key={role.role_id} value={role.role_id}>{role.role_name}</option>
+                    ))}
+                  </select>
+                </Field>
+                {isEdit && (
+                  <Field label="Status">
+                    <select name="status" value={form.status} onChange={handleChange} style={inputStyle}>
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status.value} value={status.value}>{status.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                {!isEdit && (
+                  <Field label="Temporary Password">
+                    <input name="password" type="password" value={form.password} onChange={handleChange} style={inputStyle} />
+                  </Field>
+                )}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <Button onClick={onClose} disabled={saving}>Cancel</Button>
+                <Button variant="primary" type="submit" disabled={saving}>{saving ? "Saving..." : isEdit ? "Update User" : "Create User"}</Button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReadOnly({ label, value }) {
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ fontSize: 11, fontWeight: 900, color: C.muted, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: C.navy }}>{value}</div>
+    </div>
+  );
+}
+
+function ListTable({ users, currentUserId, onView, onEdit, onRemove }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
+        <thead>
+          <tr style={{ background: C.soft, color: C.muted, fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>
+            <th style={thStyle}>User</th>
+            <th style={thStyle}>Role</th>
+            <th style={thStyle}>Status</th>
+            <th style={thStyle}>Phone</th>
+            <th style={thStyle}>Last Login</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => {
+            const st = statusLabel(user.status);
+            const isCurrentUser = Number(user.user_id) === Number(currentUserId);
+            return (
+              <tr key={user.user_id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={tdStyle}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <UserAvatar user={user} size={44} />
+                    <div>
+                      <div style={{ fontWeight: 900, color: C.navy }}>{user.username || "No username"}</div>
+                      <div style={{ fontSize: 12, color: C.text }}>{user.email || "No email"}</div>
+                    </div>
+                  </div>
+                </td>
+                <td style={tdStyle}>{user.role || "Unassigned"}</td>
+                <td style={tdStyle}><Badge bg={st.bg} color={st.color}>{st.label}</Badge></td>
+                <td style={tdStyle}>{user.phone || "Not set"}</td>
+                <td style={tdStyle}>{formatDate(user.last_login, true)}</td>
+                <td style={{ ...tdStyle, textAlign: "right" }}>
+                  <div style={{ display: "inline-flex", gap: 8 }}>
+                    <Button onClick={() => onView(user)}>View</Button>
+                    <Button onClick={() => onEdit(user)} disabled={isCurrentUser}>Edit</Button>
+                    <Button variant="danger" onClick={() => onRemove(user)} disabled={isCurrentUser || user.status === "deactivated"}>Remove</Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const thStyle = { textAlign: "left", padding: "12px 14px", fontWeight: 900 };
+const tdStyle = { padding: "13px 14px", color: C.text, fontSize: 13, verticalAlign: "middle" };
+
+export default function ManageUsers() {
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState(null);
+  const [roleFilter, setRoleFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("recent-desc");
+  const [viewMode, setViewMode] = useState("grid");
+  const [modal, setModal] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const itemsPerPage = 8;
+
+  const showAlert = useCallback((type, message) => {
+    setAlert({ type, message });
+    window.setTimeout(() => setAlert(null), 4200);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [usersResponse, rolesResponse] = await Promise.all([
+        authFetch("/users"),
+        authFetch("/users/roles"),
+      ]);
+      const usersData = await parseApiResponse(usersResponse);
+      const rolesData = await parseApiResponse(rolesResponse);
+      setUsers(Array.isArray(usersData.data) ? usersData.data : []);
+      setRoles(Array.isArray(rolesData.data) ? rolesData.data : []);
+    } catch (error) {
+      console.error("Manage users load error:", error);
+      showAlert("err", error.message || "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  }, [showAlert]);
+
+  useEffect(() => {
+    setCurrentUserId(getCurrentUserId());
+    loadData();
+  }, [loadData]);
+
+  const stats = useMemo(() => {
+    const byRole = roles.reduce((acc, role) => {
+      acc[role.role_name] = users.filter((user) => user.role === role.role_name).length;
+      return acc;
+    }, {});
+    return {
+      total: users.length,
+      active: users.filter((user) => user.status === "verified").length,
+      locked: users.filter((user) => user.status === "locked").length,
+      deactivated: users.filter((user) => user.status === "deactivated").length,
+      medical: (byRole.Doctor || 0) + (byRole.Nurse || 0),
+    };
+  }, [users, roles]);
+
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return users
+      .filter((user) => {
+        const roleMatches = roleFilter === "All" || user.role === roleFilter;
+        const statusMatches = statusFilter === "all" || user.status === statusFilter;
+        const searchMatches = !query || [
+          user.username,
+          user.email,
+          user.first_name,
+          user.last_name,
+          user.phone,
+          user.gender,
+          user.role,
+        ].some((value) => String(value || "").toLowerCase().includes(query));
+        return roleMatches && statusMatches && searchMatches;
+      })
+      .sort((a, b) => {
+        if (sortBy === "name-asc") return getFullName(a).localeCompare(getFullName(b));
+        if (sortBy === "name-desc") return getFullName(b).localeCompare(getFullName(a));
+        if (sortBy === "role-asc") return String(a.role || "").localeCompare(String(b.role || ""));
+        if (sortBy === "recent-asc") return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+  }, [users, roleFilter, statusFilter, search, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
+  const page = Math.min(currentPage, totalPages);
+  const pageUsers = filteredUsers.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+
+  const resetPage = () => setCurrentPage(1);
+
+  const handleSave = async (payload, profileFile) => {
+    setSaving(true);
+    try {
+      if (modal?.user) {
+        if (payload.role_id) {
+          await parseApiResponse(await authFetch(`/users/${modal.user.user_id}/role`, {
+            method: "PATCH",
+            body: JSON.stringify({ role_id: payload.role_id }),
+          }));
+        }
+        if (payload.status) {
+          await parseApiResponse(await authFetch(`/users/${modal.user.user_id}/status`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: payload.status }),
+          }));
+        }
+        showAlert("ok", "User updated successfully");
+      } else {
+        const created = await parseApiResponse(await authFetch("/users", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }));
+        const createdUserId = created.data?.user_id;
+        if (profileFile && createdUserId) {
+          await uploadProfilePhoto(createdUserId, profileFile);
+        }
+        showAlert("ok", profileFile ? "User and profile photo created successfully" : "User created successfully");
+      }
+
+      setModal(null);
+      await loadData();
+    } catch (error) {
+      console.error("Manage users save error:", error);
+      showAlert("err", error.message || "Failed to save user");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemove = async (user) => {
+    if (!window.confirm(`Deactivate "${user.username}"? This keeps the audit trail and blocks access.`)) return;
+    try {
+      await parseApiResponse(await authFetch(`/users/${user.user_id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "deactivated" }),
+      }));
+      showAlert("ok", "User deactivated successfully");
+      await loadData();
+    } catch (error) {
+      console.error("Manage users remove error:", error);
+      showAlert("err", error.message || "Failed to deactivate user");
+    }
+  };
+
+  return (
+    <MainLayout>
+      {alert && (
+        <div style={{
+          position: "fixed",
+          top: 22,
+          right: 22,
+          zIndex: 700,
+          padding: "12px 16px",
+          borderRadius: 12,
+          background: alert.type === "ok" ? "#eaf8f0" : "#fff2f4",
+          color: alert.type === "ok" ? C.ok : C.danger,
+          border: `1px solid ${alert.type === "ok" ? "#b8e5cc" : "#f7c5cb"}`,
+          boxShadow: "0 8px 24px rgba(15,23,42,.16)",
+          fontSize: 13,
+          fontWeight: 800,
+        }}>
+          {alert.message}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 900, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase" }}>Admin</div>
+          <h1 style={{ margin: "4px 0 4px", color: C.navy, fontSize: 24, lineHeight: 1.2 }}>Manage Users</h1>
+          <div style={{ color: C.text, fontSize: 13 }}>Backend-synced account directory, roles, statuses, and profile photos.</div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button onClick={loadData} disabled={loading}>Refresh</Button>
+          <Button variant="primary" onClick={() => setModal({ mode: "create", user: null })}>Add User</Button>
+        </div>
+      </div>
+
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 14, marginBottom: 18 }}>
+        {[
+          { label: "Total Users", value: stats.total, sub: `${stats.active} active`, color: C.blue },
+          { label: "Medical Staff", value: stats.medical, sub: "Doctors and nurses", color: C.blue2 },
+          { label: "Locked", value: stats.locked, sub: "Needs admin review", color: C.danger },
+          { label: "Deactivated", value: stats.deactivated, sub: "Access blocked", color: "#666" },
+        ].map((item) => (
+          <div key={item.label} style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, boxShadow: "0 2px 10px rgba(15,23,42,.05)" }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".05em" }}>{item.label}</div>
+            <div style={{ fontSize: 30, fontWeight: 900, color: item.color, marginTop: 8 }}>{loading ? "-" : item.value}</div>
+            <div style={{ fontSize: 12, color: C.text, marginTop: 4 }}>{item.sub}</div>
+          </div>
+        ))}
+      </section>
+
+      <section style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 16, boxShadow: "0 2px 10px rgba(15,23,42,.05)", overflow: "hidden" }}>
+        <div style={{ padding: 18, borderBottom: `1px solid ${C.border}`, background: "linear-gradient(to right,#f8fafd,#fff)", display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1.4fr) repeat(3,minmax(150px,1fr)) auto", gap: 10, alignItems: "center" }}>
+            <input
+              value={search}
+              onChange={(event) => { setSearch(event.target.value); resetPage(); }}
+              placeholder="Search users, email, phone, role..."
+              style={inputStyle}
+            />
+            <select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); resetPage(); }} style={inputStyle}>
+              <option value="All">All Roles</option>
+              {roles.map((role) => <option key={role.role_id} value={role.role_name}>{role.role_name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); resetPage(); }} style={inputStyle}>
+              <option value="all">All Statuses</option>
+              {STATUS_OPTIONS.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+            </select>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} style={inputStyle}>
+              <option value="recent-desc">Newest First</option>
+              <option value="recent-asc">Oldest First</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="name-desc">Name Z-A</option>
+              <option value="role-asc">Role A-Z</option>
+            </select>
+            <div style={{ display: "flex", gap: 6, background: C.soft, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+              <Button variant={viewMode === "grid" ? "primary" : "secondary"} onClick={() => setViewMode("grid")}>Grid</Button>
+              <Button variant={viewMode === "list" ? "primary" : "secondary"} onClick={() => setViewMode("list")}>List</Button>
+            </div>
+          </div>
+          <div style={{ color: C.text, fontSize: 12, fontWeight: 700 }}>
+            Showing {pageUsers.length} of {filteredUsers.length} matched user{filteredUsers.length === 1 ? "" : "s"}
+          </div>
+        </div>
+
+        <div style={{ padding: 18 }}>
+          {loading ? (
+            <div style={{ padding: 36, textAlign: "center", color: C.text, fontWeight: 800 }}>Loading users...</div>
+          ) : pageUsers.length === 0 ? (
+            <div style={{ padding: 36, textAlign: "center", color: C.text, fontWeight: 800 }}>No users match the current filters.</div>
+          ) : viewMode === "grid" ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(270px,1fr))", gap: 14 }}>
+              {pageUsers.map((user) => (
+                <UserCard
+                  key={user.user_id}
+                  user={user}
+                  currentUserId={currentUserId}
+                  onView={(selected) => setModal({ mode: "view", user: selected })}
+                  onEdit={(selected) => setModal({ mode: "edit", user: selected })}
+                  onRemove={handleRemove}
+                />
+              ))}
+            </div>
+          ) : (
+            <ListTable
+              users={pageUsers}
+              currentUserId={currentUserId}
+              onView={(selected) => setModal({ mode: "view", user: selected })}
+              onEdit={(selected) => setModal({ mode: "edit", user: selected })}
+              onRemove={handleRemove}
+            />
+          )}
+        </div>
+
+        {!loading && totalPages > 1 && (
+          <div style={{ padding: 18, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ color: C.text, fontSize: 12, fontWeight: 800 }}>Page {page} of {totalPages}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button disabled={page <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>Previous</Button>
+              <Button disabled={page >= totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {modal && (
+        <UserModal
+          user={modal.user}
+          mode={modal.mode}
+          roles={roles}
+          saving={saving}
+          onClose={() => setModal(null)}
+          onSave={handleSave}
+        />
+      )}
+    </MainLayout>
+  );
+}

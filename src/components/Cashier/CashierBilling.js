@@ -1,0 +1,242 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import MainLayout from "../Layout/MainLayout";
+import { authFetch } from "../../utils/auth";
+import {
+  ActionButton,
+  EmptyState,
+  ErrorState,
+  Field,
+  LoadingState,
+  Panel,
+  StatusBadge,
+  formatDate,
+  formatTime,
+  getRows,
+  inputStyle,
+  money,
+} from "../Workflow/ClinicUi";
+
+const DEFAULT_FEE = 800;
+
+export default function CashierBilling() {
+  const [appointments, setAppointments] = useState([]);
+  const [bills, setBills] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [fee, setFee] = useState(DEFAULT_FEE);
+  const [method, setMethod] = useState("cash");
+  const [amountTendered, setAmountTendered] = useState(DEFAULT_FEE);
+  const [discountPct, setDiscountPct] = useState(0);
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [appointmentsRes, billingRes] = await Promise.all([
+        authFetch("/appointments?limit=100"),
+        authFetch("/billing?limit=100"),
+      ]);
+      const appointmentsPayload = await appointmentsRes.json();
+      const billingPayload = await billingRes.json();
+      if (!appointmentsRes.ok) throw new Error(appointmentsPayload.message || "Failed to load appointments.");
+      if (!billingRes.ok) throw new Error(billingPayload.message || "Failed to load billing records.");
+      setAppointments(getRows(appointmentsPayload, "appointments"));
+      setBills(getRows(billingPayload, "data"));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const paidAppointmentIds = useMemo(() => {
+    return new Set(bills.filter((bill) => bill.status === "PAID").map((bill) => Number(bill.appointment_id)));
+  }, [bills]);
+
+  const payable = useMemo(() => {
+    return appointments
+      .filter((item) => item.status === "CONFIRMED")
+      .filter((item) => !paidAppointmentIds.has(Number(item.id)))
+      .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
+  }, [appointments, paidAppointmentIds]);
+
+  const total = useMemo(() => {
+    const subtotal = Number(fee || 0);
+    return Math.max(0, subtotal - subtotal * (Number(discountPct || 0) / 100));
+  }, [discountPct, fee]);
+
+  const canSubmit = Boolean(selected && !saving && Number(fee || 0) >= 0 && Number(amountTendered || 0) >= total);
+
+  async function submitPayment(event) {
+    event.preventDefault();
+    if (!selected || saving) return;
+
+    if (Number(amountTendered || 0) < total) {
+      setError("Amount tendered must be equal to or greater than the total.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await authFetch("/billing", {
+        method: "POST",
+        body: JSON.stringify({
+          appointment_id: selected.id,
+          patient_id: selected.patient_id,
+          line_items: [{ description: "Consultation fee", amount: Number(fee || 0) }],
+          discount_type: Number(discountPct || 0) > 0 ? "manual" : "none",
+          discount_pct: Number(discountPct || 0),
+          payment_method: method,
+          amount_tendered: Number(amountTendered || total),
+          notes,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "Failed to process payment.");
+
+      const queue = payload.queue_entry;
+      setMessage(`Payment complete. Queue #${queue?.queue_number || "-"} created for ${selected.patient_name}.`);
+      setSelected(null);
+      setFee(DEFAULT_FEE);
+      setAmountTendered(DEFAULT_FEE);
+      setDiscountPct(0);
+      setNotes("");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <MainLayout pageTitle="Cashier Billing" pageSubtitle="Paid confirmed appointments enter the live clinic queue">
+      <div style={{ display: "grid", gap: 14 }}>
+        <ErrorState message={error} />
+        {message && <div style={{ padding: "10px 12px", borderRadius: 8, background: "#edf8f1", color: "#0f6b3c", fontSize: 13, fontWeight: 800 }}>{message}</div>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px,.9fr)", gap: 14, alignItems: "start" }}>
+          <Panel style={{ overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #e8eef6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 900, color: "#162235" }}>Ready for Payment</div>
+                <div style={{ color: "#6b778c", fontSize: 12 }}>Only confirmed appointments can be billed.</div>
+              </div>
+              <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+            </div>
+
+            {loading ? (
+              <LoadingState label="Loading billing queue..." />
+            ) : payable.length === 0 ? (
+              <EmptyState title="No confirmed appointments to bill" detail="Frontdesk must confirm appointments first." />
+            ) : (
+              <div style={{ display: "grid" }}>
+                {payable.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSelected(item);
+                      setMessage("");
+                      setError("");
+                    }}
+                    style={{
+                      border: "none",
+                      borderTop: "1px solid #eef3f9",
+                      background: selected?.id === item.id ? "#f2f7ff" : "#fff",
+                      padding: 14,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 10,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 900, color: "#162235" }}>{item.patient_name}</div>
+                      <div style={{ color: "#6b778c", fontSize: 12 }}>
+                        #{item.id} - {formatDate(item.date)} {formatTime(item.time)} - {item.specialty_name || "No specialty"}
+                      </div>
+                    </div>
+                    <StatusBadge status={item.status} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </Panel>
+
+          <Panel style={{ padding: 16 }}>
+            {!selected ? (
+              <EmptyState title="Select an appointment" detail="Payment creates the bill and queues the patient." />
+            ) : (
+              <form onSubmit={submitPayment} style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#162235" }}>{selected.patient_name}</div>
+                  <div style={{ color: "#6b778c", fontSize: 13 }}>
+                    Appointment #{selected.id} - {selected.doctor_name || "Doctor"}
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <Field label="Consultation fee">
+                    <input style={inputStyle} type="number" min="0" step="0.01" value={fee} onChange={(e) => setFee(e.target.value)} />
+                  </Field>
+                  <Field label="Discount %">
+                    <input style={inputStyle} type="number" min="0" max="100" step="0.01" value={discountPct} onChange={(e) => setDiscountPct(e.target.value)} />
+                  </Field>
+                  <Field label="Payment method">
+                    <select style={inputStyle} value={method} onChange={(e) => setMethod(e.target.value)}>
+                      <option value="cash">Cash</option>
+                      <option value="gcash">GCash</option>
+                      <option value="maya">Maya</option>
+                      <option value="card">Card</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                    </select>
+                  </Field>
+                  <Field label="Amount tendered">
+                    <input style={inputStyle} type="number" min="0" step="0.01" value={amountTendered} onChange={(e) => setAmountTendered(e.target.value)} />
+                  </Field>
+                </div>
+
+                <Field label="Notes">
+                  <textarea style={{ ...inputStyle, minHeight: 70 }} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </Field>
+
+                <div style={{ border: "1px solid #e3ebf5", borderRadius: 8, padding: 12, display: "grid", gap: 6 }}>
+                  <Row label="Subtotal" value={money(fee)} />
+                  <Row label="Discount" value={`${discountPct || 0}%`} />
+                  <Row label="Total" value={money(total)} strong />
+                  <Row label="Change" value={money(Number(amountTendered || 0) - total)} />
+                </div>
+
+                <ActionButton type="submit" disabled={!canSubmit}>
+                  {saving ? "Processing..." : "Process Payment and Queue"}
+                </ActionButton>
+              </form>
+            )}
+          </Panel>
+        </div>
+      </div>
+    </MainLayout>
+  );
+}
+
+function Row({ label, value, strong }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: strong ? 16 : 13, fontWeight: strong ? 900 : 700, color: strong ? "#162235" : "#42526a" }}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
