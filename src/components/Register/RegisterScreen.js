@@ -327,7 +327,7 @@ export default function RegisterScreen() {
         role_id:       5,
         ...(form.phone ? { phone: form.phone.trim() } : {}),
       };
-      const res  = await fetch(`${API_URL}/users`, {
+      const res  = await fetch(`${API_URL}/users/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

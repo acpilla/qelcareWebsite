@@ -6,7 +6,6 @@ const { authenticate, authorize } = require("../../../shared/middleware/tokenMid
 router.use(authenticate);
 
 router.get("/me", authorize(["Patient"]), ctrl.getMyRecords);
-
 router.post("/", authorize(["Doctor"]), ctrl.create);
 router.get("/", authorize(["Admin", "Nurse", "Doctor", "Cashier", "Frontdesk"]), ctrl.getAll);
 router.get("/patient/:patientId", authorize(["Admin", "Nurse", "Doctor", "Cashier", "Frontdesk"]), ctrl.getByPatient);

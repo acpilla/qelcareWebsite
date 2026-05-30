@@ -162,13 +162,43 @@ const Appointment = {
         TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
         u.email AS doctor_email,
         s.specialty_name,
-        s.slug AS specialty_slug
+        s.slug AS specialty_slug,
+        latest_mr.record_id AS latest_record_id,
+        latest_mr.diagnosis AS latest_diagnosis,
+        latest_mr.lab_requests AS requested_services,
+        latest_mr.lab_requests AS lab_requests
       FROM appointments a
       JOIN patients p ON a.patient_id = p.id
       JOIN users u ON a.doctor_id = u.user_id
       LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
+      LEFT JOIN LATERAL (
+        SELECT mr.record_id, mr.diagnosis, mr.lab_requests, mr.visit_date, mr.created_at
+        FROM medical_records mr
+        WHERE mr.appointment_id = a.id
+        ORDER BY COALESCE(mr.visit_date, mr.created_at::date) DESC, mr.record_id DESC
+        LIMIT 1
+      ) latest_mr ON true
       ${where}
-      ORDER BY a.date DESC, a.time ASC, a.id DESC
+      ORDER BY
+        CASE
+          WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN 0
+          ELSE 1
+        END ASC,
+        CASE a.status
+          WHEN 'IN_QUEUE' THEN 0
+          WHEN 'CONFIRMED' THEN 1
+          WHEN 'PENDING' THEN 2
+          WHEN 'RESCHEDULED' THEN 3
+          WHEN 'COMPLETED' THEN 4
+          WHEN 'CANCELLED' THEN 5
+          WHEN 'NO_SHOW' THEN 6
+          ELSE 9
+        END ASC,
+        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.date END ASC NULLS LAST,
+        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.time END ASC NULLS LAST,
+        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.date END DESC NULLS LAST,
+        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.time END DESC NULLS LAST,
+        a.id DESC
       LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
 
     const countSql = `
@@ -209,11 +239,22 @@ const Appointment = {
          TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
          u.email AS doctor_email,
          s.specialty_name,
-         s.slug AS specialty_slug
+         s.slug AS specialty_slug,
+         latest_mr.record_id AS latest_record_id,
+         latest_mr.diagnosis AS latest_diagnosis,
+         latest_mr.lab_requests AS requested_services,
+         latest_mr.lab_requests AS lab_requests
        FROM appointments a
        JOIN patients p ON a.patient_id = p.id
        JOIN users u ON a.doctor_id = u.user_id
        LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
+       LEFT JOIN LATERAL (
+         SELECT mr.record_id, mr.diagnosis, mr.lab_requests, mr.visit_date, mr.created_at
+         FROM medical_records mr
+         WHERE mr.appointment_id = a.id
+         ORDER BY COALESCE(mr.visit_date, mr.created_at::date) DESC, mr.record_id DESC
+         LIMIT 1
+       ) latest_mr ON true
        WHERE a.id = $1`,
       [id]
     );
@@ -298,7 +339,7 @@ const Appointment = {
        JOIN users u ON a.doctor_id = u.user_id
        LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
        WHERE a.doctor_id = $1
-         AND a.date = CURRENT_DATE
+         AND a.date = (NOW() AT TIME ZONE 'Asia/Manila')::date
          AND a.status NOT IN ('CANCELLED','NO_SHOW')
        ORDER BY a.time ASC`,
       [doctorId]

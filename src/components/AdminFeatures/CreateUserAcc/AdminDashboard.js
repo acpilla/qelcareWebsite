@@ -22,11 +22,14 @@ const C = {
   bg:      "#f3f6fb",
 };
 
-// --- Status config (only the 3 valid statuses) --------------------------------
+// --- Appointment status config -------------------------------------------------
 const STATUS_CFG = {
   PENDING:   { label: "Pending",   bg: "#f5f5f5",  color: "#666"       },
   CONFIRMED: { label: "Confirmed", bg: C.blueL,    color: C.blue       },
+  IN_QUEUE:  { label: "In Queue",  bg: C.amberL,   color: C.amber      },
   COMPLETED: { label: "Completed", bg: C.tealL,    color: C.teal       },
+  CANCELLED: { label: "Cancelled", bg: "#fff2f4",  color: "#b63342"    },
+  NO_SHOW:   { label: "No Show",   bg: "#f1f5f9",  color: "#64748b"    },
 };
 
 // --- Dept colors (cycle) ------------------------------------------------------
@@ -343,7 +346,7 @@ export default function AdminDashboard() {
             <div style={{ fontSize: 14, fontWeight: 800, color: C.navy }}>Today's Appointments</div>
             {/* Status filter tabs */}
             <div style={{ display: "flex", gap: 6 }}>
-              {["ALL", "PENDING", "CONFIRMED", "COMPLETED"].map(s => {
+              {["ALL", "PENDING", "CONFIRMED", "IN_QUEUE", "COMPLETED"].map(s => {
                 const active = statusFilter === s;
                 const cfg = s === "ALL" ? { label: "All", bg: C.blueL, color: C.blue } : STATUS_CFG[s];
                 return (
@@ -384,7 +387,7 @@ export default function AdminDashboard() {
               ))
             ) : filteredAppts.length === 0 ? (
               <div style={{ padding: "24px 18px", textAlign: "center", fontSize: 13, color: C.muted }}>
-                {statusFilter === "ALL" ? "No appointments scheduled today." : `No ${STATUS_CFG[statusFilter]?.label.toLowerCase()} appointments.`}
+                {statusFilter === "ALL" ? "No appointments scheduled today." : `No ${(STATUS_CFG[statusFilter]?.label || statusFilter).toLowerCase()} appointments.`}
               </div>
             ) : (
               filteredAppts.map(a => (
@@ -440,7 +443,10 @@ export default function AdminDashboard() {
                     {[
                       { label: "Pending",   count: todayAppts.filter(a => a.status === "PENDING").length,   color: "#666",   bg: "#f5f5f5"  },
                       { label: "Confirmed", count: todayAppts.filter(a => a.status === "CONFIRMED").length, color: C.blue,   bg: C.blueL   },
+                      { label: "In Queue",  count: todayAppts.filter(a => a.status === "IN_QUEUE").length,  color: C.amber,  bg: C.amberL  },
                       { label: "Completed", count: todayAppts.filter(a => a.status === "COMPLETED").length, color: C.teal,   bg: C.tealL   },
+                      { label: "No Show",   count: todayAppts.filter(a => a.status === "NO_SHOW").length,   color: "#64748b", bg: "#f1f5f9" },
+                      { label: "Cancelled", count: todayAppts.filter(a => a.status === "CANCELLED").length, color: "#b63342", bg: "#fff2f4" },
                     ].map(s => (
                       <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: C.navy }}>{s.label}</span>

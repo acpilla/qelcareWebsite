@@ -66,14 +66,14 @@ function toISODate(value) {
 
 function inferResultType(text, fileName = "") {
   const haystack = `${text} ${fileName}`.toLowerCase();
-  if (/complete blood count|\bcbc\b/.test(haystack)) return "Complete Blood Count";
-  if (/urinalysis|urine/.test(haystack)) return "Urinalysis";
-  if (/x[- ]?ray|radiograph/.test(haystack)) return "X-ray Result";
-  if (/ultrasound|sonogram/.test(haystack)) return "Ultrasound Result";
-  if (/ecg|electrocardiogram/.test(haystack)) return "ECG Result";
-  if (/blood chemistry|creatinine|cholesterol|glucose|triglyceride/.test(haystack)) return "Blood Chemistry";
-  if (/laboratory|lab result|reference range/.test(haystack)) return "Laboratory Result";
-  return "Medical Result";
+  if (/complete blood count|\bcbc\b/.test(haystack)) return "Personal CBC Paper Copy";
+  if (/urinalysis|urine/.test(haystack)) return "Personal Urinalysis Paper Copy";
+  if (/x[- ]?ray|radiograph/.test(haystack)) return "Personal Imaging Paper Copy";
+  if (/ultrasound|sonogram/.test(haystack)) return "Personal Ultrasound Paper Copy";
+  if (/ecg|electrocardiogram/.test(haystack)) return "Personal ECG Paper Copy";
+  if (/blood chemistry|creatinine|cholesterol|glucose|triglyceride/.test(haystack)) return "Personal Blood Chemistry Paper Copy";
+  if (/laboratory|lab result|reference range/.test(haystack)) return "Personal Medical Result Copy";
+  return "Personal Medical Paper";
 }
 
 function inferFacility(text) {
@@ -336,7 +336,7 @@ export default function PatientResults() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 900, color: "#162235" }}>Medical Results Tracking</div>
-            <div style={{ color: "#6b778c", fontSize: 13, marginTop: 3 }}>Upload lab or diagnostic results, run OCR, review the fields, and save them to your account.</div>
+            <div style={{ color: "#6b778c", fontSize: 13, marginTop: 3 }}>Save personal copies of printed medical papers for your own tracking. OCR only fills text fields; this is not an official clinic, laboratory, or diagnostic submission.</div>
           </div>
           <ActionButton onClick={startNew}>New Result</ActionButton>
         </div>
@@ -354,7 +354,7 @@ export default function PatientResults() {
           {loading ? (
             <LoadingState label="Loading medical results..." />
           ) : filteredResults.length === 0 ? (
-            <EmptyState title="No medical results" detail="Upload a result file or manually enter one." />
+            <EmptyState title="No tracked papers" detail="Upload a personal copy of a printed medical paper or manually enter notes." />
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
               {filteredResults.map((item) => (
@@ -373,8 +373,8 @@ export default function PatientResults() {
         <Panel style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#162235" }}>{selected ? "Edit Medical Result" : "Upload Medical Result"}</div>
-              <div style={{ color: "#6b778c", fontSize: 12, marginTop: 3 }}>OCR extracts text only. Review everything before saving.</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#162235" }}>{selected ? "Edit Tracked Medical Paper" : "Upload Personal Medical Paper"}</div>
+              <div style={{ color: "#6b778c", fontSize: 12, marginTop: 3 }}>OCR extracts text only. Review everything before saving to your personal tracker. Staff do not treat this as an official uploaded result.</div>
             </div>
             {ocrBusy && <div style={{ color: "#163a6b", fontWeight: 900, fontSize: 13 }}>OCR {ocrProgress}%</div>}
           </div>
@@ -397,13 +397,13 @@ export default function PatientResults() {
               </Field>
             )}
             <Field label="Title">
-              <input name="title" value={form.title} onChange={setField} style={inputStyle} placeholder="CBC Result, Urinalysis, X-ray Result" />
+              <input name="title" value={form.title} onChange={setField} style={inputStyle} placeholder="Personal medical paper copy" />
             </Field>
             <Field label="Result type">
-              <input name="result_type" value={form.result_type} onChange={setField} style={inputStyle} placeholder="Laboratory Result" />
+              <input name="result_type" value={form.result_type} onChange={setField} style={inputStyle} placeholder="Personal medical paper type" />
             </Field>
             <Field label="Source facility">
-              <input name="source_facility" value={form.source_facility} onChange={setField} style={inputStyle} placeholder="Clinic, hospital, or laboratory" />
+              <input name="source_facility" value={form.source_facility} onChange={setField} style={inputStyle} placeholder="Clinic, hospital, or diagnostic center" />
             </Field>
             <Field label="Result date">
               <input name="result_date" type="date" value={form.result_date} onChange={setField} style={inputStyle} />
@@ -415,7 +415,7 @@ export default function PatientResults() {
               <textarea name="extracted_text" value={form.extracted_text} onChange={setField} rows={12} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="OCR text or manually typed result details" />
             </Field>
             <Field label="Summary notes">
-              <textarea name="summary_notes" value={form.summary_notes} onChange={setField} rows={4} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="Your own notes or reminder. This is not a diagnosis." />
+              <textarea name="summary_notes" value={form.summary_notes} onChange={setField} rows={4} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="Your own notes, reminders, or tracking details. This is not a diagnosis or official clinic result." />
             </Field>
           </div>
 

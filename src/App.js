@@ -12,6 +12,9 @@ import AdminAppointments from "./components/AdminFeatures/AppointmentManagement/
 import AdminBilling from "./components/AdminFeatures/Billing/AdminBilling";
 import ProfileSettings from "./components/AdminFeatures/ProfileSettings/ProfileSettings";
 import AnalyticsReports from "./components/AdminFeatures/ReportsAndAnalytics/index";
+import AppointmentAnalyticsReport from "./components/AdminFeatures/ReportsAndAnalytics/AppointmentAnalyticsReport";
+import MedicalRecordReport from "./components/AdminFeatures/ReportsAndAnalytics/MedicalRecordReport";
+import UserStatisticsReport from "./components/AdminFeatures/ReportsAndAnalytics/UserStatisticsReport";
 import { AdminLogs, AdminPatients, AdminQueue, AdminRecords } from "./components/AdminFeatures/Placeholders";
 
 import QueueDisplayScreen from "./components/QueueDisplay/QueueDisplayScreen";
@@ -58,7 +61,7 @@ function RoleRedirect() {
   const redirectMap = {
     Admin: "/admin/dashboard",
     Doctor: "/doctor/dashboard",
-    Nurse: "/nurse/queue",
+    Nurse: "/nurse-station",
     Cashier: "/cashier/dashboard",
     Patient: "/dashboard",
     Frontdesk: "/frontdesk/dashboard",
@@ -130,6 +133,9 @@ export default function App() {
         <Route path="/admin/records" element={guard(["Admin"], <AdminRecords />)} />
         <Route path="/admin/billing" element={guard(["Admin"], <AdminBilling />)} />
         <Route path="/admin/reports" element={guard(["Admin"], <AnalyticsReports />)} />
+        <Route path="/admin/reports/appointments" element={guard(["Admin"], <AppointmentAnalyticsReport />)} />
+        <Route path="/admin/reports/medical-records" element={guard(["Admin"], <MedicalRecordReport />)} />
+        <Route path="/admin/reports/users" element={guard(["Admin"], <UserStatisticsReport />)} />
         <Route path="/admin/logs" element={guard(["Admin"], <AdminLogs />)} />
         <Route path="/admin/profile" element={guard(["Admin"], <ProfileSettings />)} />
 
@@ -216,7 +222,7 @@ export default function App() {
         <Route
           path="/patient/results"
           element={guard(["Patient"], (
-            <MainLayout pageTitle="Medical Results" pageSubtitle="Track uploaded lab and diagnostic results">
+            <MainLayout pageTitle="Medical Results" pageSubtitle="Track personal printed medical papers and reminders">
               <PatientResults />
             </MainLayout>
           ))}

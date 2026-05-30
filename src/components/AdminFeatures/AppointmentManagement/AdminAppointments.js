@@ -35,8 +35,8 @@ const STATUS_META = {
 
 const TRANSITIONS = {
   PENDING: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["CANCELLED", "NO_SHOW"],
-  IN_QUEUE: ["COMPLETED", "NO_SHOW"],
+  CONFIRMED: ["IN_QUEUE", "CANCELLED", "NO_SHOW"],
+  IN_QUEUE: ["CANCELLED", "NO_SHOW"],
   RESCHEDULED: ["CONFIRMED", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
@@ -70,7 +70,15 @@ function formatTime(value) {
 }
 
 function todayInput() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function patientName(patient) {
@@ -273,6 +281,7 @@ function AppointmentModal({ mode, appointment, patients, doctors, specialties, s
 function AppointmentRow({ appointment, onStatus, onReschedule }) {
   const actions = TRANSITIONS[appointment.status] || [];
   const terminal = actions.length === 0;
+  const isToday = appointment.date === todayInput();
 
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -300,11 +309,12 @@ function AppointmentRow({ appointment, onStatus, onReschedule }) {
       </td>
       <td style={{ ...tdStyle, textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {actions.includes("CONFIRMED") && <Button onClick={() => onStatus(appointment, "CONFIRMED")}>Confirm</Button>}
-          {actions.includes("COMPLETED") && <Button onClick={() => onStatus(appointment, "COMPLETED")}>Complete</Button>}
-          {actions.includes("NO_SHOW") && <Button onClick={() => onStatus(appointment, "NO_SHOW")}>No Show</Button>}
+          {actions.includes("CONFIRMED") && <Button onClick={() => onStatus(appointment, "CONFIRMED")}>{isToday ? "Approve and Queue" : "Approve"}</Button>}
+          {actions.includes("IN_QUEUE") && isToday && <Button onClick={() => onStatus(appointment, "IN_QUEUE")}>Check In</Button>}
+          {actions.includes("NO_SHOW") && isToday && <Button onClick={() => onStatus(appointment, "NO_SHOW")}>No Show</Button>}
           {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(appointment.status) && <Button onClick={() => onReschedule(appointment)}>Reschedule</Button>}
           {actions.includes("CANCELLED") && <Button variant="danger" onClick={() => onStatus(appointment, "CANCELLED")}>Cancel</Button>}
+          {appointment.status === "CONFIRMED" && !isToday && <span style={{ color: C.muted, fontSize: 12, alignSelf: "center" }}>Waiting date</span>}
           {terminal && <span style={{ color: C.muted, fontSize: 12 }}>No actions</span>}
         </div>
       </td>
@@ -453,7 +463,7 @@ export default function AdminAppointments() {
       }));
       const saved = response.data || response.appointment;
       setAppointments((prev) => prev.map((appt) => (appt.id === saved.id ? saved : appt)));
-      showAlert("ok", `Appointment updated to ${STATUS_META[nextStatus]?.label || nextStatus}`);
+      showAlert("ok", response.message || `Appointment updated to ${STATUS_META[saved.status]?.label || saved.status}`);
     } catch (error) {
       console.error("Appointment status error:", error);
       showAlert("err", error.message || "Failed to update appointment");
@@ -486,7 +496,7 @@ export default function AdminAppointments() {
         <div>
           <div style={{ fontSize: 11, fontWeight: 900, color: C.muted, letterSpacing: ".08em", textTransform: "uppercase" }}>Admin</div>
           <h1 style={{ margin: "4px 0 4px", color: C.navy, fontSize: 24, lineHeight: 1.2 }}>Appointment Management</h1>
-          <div style={{ color: C.text, fontSize: 13 }}>Book, confirm, reschedule, cancel, and mark no-shows. Queue entry is created after cashier payment.</div>
+          <div style={{ color: C.text, fontSize: 13 }}>Book, approve, reschedule, cancel, and mark no-shows. Same-day approvals enter the live queue.</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Button onClick={loadAppointments} disabled={loading}>Refresh</Button>

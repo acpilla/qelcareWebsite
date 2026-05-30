@@ -2,7 +2,15 @@ const Queue = require("../models/Queue");
 const logger = require("../../../shared/utils/activityLogger");
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 async function writeLog(req, payload) {
@@ -15,6 +23,44 @@ async function writeLog(req, payload) {
   } catch (err) {
     console.error("Queue activity log error:", err);
   }
+}
+
+const STATUS_ROLE_RULES = {
+  WAITING: ["Admin", "Nurse", "Frontdesk"],
+  CALLED: ["Admin", "Nurse", "Doctor"],
+  IN_PROGRESS: ["Admin", "Nurse", "Doctor"],
+  SKIPPED: ["Admin", "Nurse", "Frontdesk"],
+  DONE: ["Admin", "Doctor"],
+  NO_SHOW: ["Admin", "Frontdesk"],
+  CANCELLED: ["Admin", "Frontdesk"],
+};
+
+function normalizeStatus(status) {
+  return String(status || "").trim().toUpperCase();
+}
+
+function canRoleSetQueueStatus(role, status) {
+  if (role === "Admin") return true;
+  return (STATUS_ROLE_RULES[status] || []).includes(role);
+}
+
+async function assertQueueOwnership(req, queueId, nextStatus) {
+  const entry = await Queue.findById(queueId);
+  if (!entry) return null;
+
+  if (req.user?.role === "Doctor" && Number(entry.doctor_id) !== Number(req.user.user_id)) {
+    const err = new Error("Doctors can only update their own assigned queue patients.");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (req.user?.role === "Doctor" && !["CALLED", "WAITING", "IN_PROGRESS", "DONE"].includes(nextStatus)) {
+    const err = new Error("Doctors can only start or complete consultations.");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return entry;
 }
 
 const queueController = {
@@ -43,7 +89,6 @@ const queueController = {
     try {
       const { specialtyId } = req.params;
       const date = req.query.date || todayISO();
-
       const queue = await Queue.findBySpecialtyAndDate(specialtyId, date);
       res.json({ success: true, data: queue, queue });
     } catch (err) {
@@ -55,22 +100,30 @@ const queueController = {
   async addToQueue(req, res) {
     try {
       const { appointment_id } = req.body || {};
+      if (!appointment_id) {
+        return res.status(400).json({ success: false, message: "appointment_id is required." });
+      }
+
+      const entry = await Queue.addToQueue(appointment_id);
 
       await writeLog(req, {
-        action: "QUEUE_MANUAL_ADD_BLOCKED",
+        action: "QUEUE_MANUAL_ADD",
         entityType: "queue",
-        entityId: null,
-        description: "Manual queue creation was blocked because queue entries are created after cashier payment.",
-        metadata: { appointment_id: appointment_id || null },
+        entityId: entry.queue_id,
+        description: "Approved appointment was added to queue.",
+        metadata: { appointment_id },
       });
 
-      res.status(409).json({
-        success: false,
-        message: "Queue entries are created only after cashier payment.",
+      res.status(201).json({
+        success: true,
+        message: entry.alreadyQueued ? "Appointment is already in queue." : "Appointment added to queue.",
+        data: entry,
+        queue_entry: entry,
       });
     } catch (err) {
-      console.error("Queue addToQueue block error:", err);
-      res.status(500).json({ success: false, message: "Failed to block manual queue request." });
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error("Queue addToQueue error:", err);
+      res.status(500).json({ success: false, message: "Failed to add appointment to queue." });
     }
   },
 
@@ -81,7 +134,18 @@ const queueController = {
         return res.status(400).json({ success: false, message: "Status is required." });
       }
 
-      const entry = await Queue.updateStatus(req.params.queueId, status, notes);
+      const nextStatus = normalizeStatus(status);
+      if (!canRoleSetQueueStatus(req.user?.role, nextStatus)) {
+        return res.status(403).json({
+          success: false,
+          message: `${req.user?.role || "This role"} cannot set queue status to ${nextStatus}.`,
+        });
+      }
+
+      const existingEntry = await assertQueueOwnership(req, req.params.queueId, nextStatus);
+      if (!existingEntry) return res.status(404).json({ success: false, message: "Queue entry not found." });
+
+      const entry = await Queue.updateStatus(req.params.queueId, nextStatus, notes);
       if (!entry) return res.status(404).json({ success: false, message: "Queue entry not found." });
 
       await writeLog(req, {
@@ -111,21 +175,29 @@ const queueController = {
 
   async autoEnqueue(req, res) {
     try {
+      const date = req.body?.date || req.query.date || todayISO();
+      const result = await Queue.autoEnqueueConfirmed(date);
+
       await writeLog(req, {
-        action: "QUEUE_AUTO_ENQUEUE_BLOCKED",
+        action: "QUEUE_AUTO_ENQUEUE",
         entityType: "queue",
         entityId: null,
-        description: "Attempted auto-enqueue was blocked because queue entries are created after payment.",
-        metadata: { date: req.body?.date || req.query.date || todayISO() },
+        description: `Auto-enqueued confirmed appointments for ${date}.`,
+        metadata: {
+          date,
+          added_count: result.added_count,
+          failed_count: result.failed_count,
+        },
       });
 
-      res.status(409).json({
-        success: false,
-        message: "Queue entries are created only after cashier payment.",
+      res.json({
+        success: true,
+        message: `${result.added_count} confirmed appointment(s) added to queue.`,
+        data: result,
       });
     } catch (err) {
       console.error("Auto enqueue error:", err);
-      res.status(500).json({ success: false, message: "Failed to block auto-enqueue request." });
+      res.status(500).json({ success: false, message: "Failed to auto-enqueue confirmed appointments." });
     }
   },
 };

@@ -1,199 +1,635 @@
-import React, { useEffect, useRef } from "react";
-import { Chart, registerables } from "chart.js";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { authFetch } from "../../../utils/auth";
 
-Chart.register(...registerables);
-
-const SUMMARY_CARDS = [
- { label: "Total Appointments", value: "3,420" },
- { label: "Completed", value: "2,984" },
- { label: "Cancelled", value: "218" },
- { label: "Avg. Daily", value: "114" },
+const RANGE_OPTIONS = [
+  { value: "past_7_days", label: "Past 7 days" },
+  { value: "past_30_days", label: "Past 30 days" },
+  { value: "this_month", label: "This month" },
+  { value: "last_month", label: "Last month" },
 ];
 
-const TABLE_ROWS = [
- { dept: "General Medicine", scheduled: 840, completed: 760, cancelled: 40 },
- { dept: "Pediatrics", scheduled: 620, completed: 551, cancelled: 28 },
- { dept: "Cardiology", scheduled: 470, completed: 421, cancelled: 19 },
- { dept: "Orthopedics", scheduled: 390, completed: 346, cancelled: 26 },
-];
-
-function useBarChart(canvasRef) {
- useEffect(() => {
- const ctx = canvasRef.current.getContext("2d");
- const chart = new Chart(ctx, {
- type: "bar",
- data: {
- labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
- datasets: [{
- label: "Appointments",
- data: [420, 510, 560, 620, 640, 670],
- borderWidth: 1,
- }],
- },
- options: { responsive: true, maintainAspectRatio: false },
- });
- return () => chart.destroy();
- }, [canvasRef]);
+function num(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function useLineChart(canvasRef) {
- useEffect(() => {
- const ctx = canvasRef.current.getContext("2d");
- const chart = new Chart(ctx, {
- type: "line",
- data: {
- labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
- datasets: [{
- label: "Daily Activity",
- data: [90, 108, 115, 121, 132, 78],
- borderWidth: 3,
- fill: false,
- }],
- },
- options: { responsive: true, maintainAspectRatio: false },
- });
- return () => chart.destroy();
- }, [canvasRef]);
+function percent(part, total) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
 }
 
-function exportTableCSV() {
- const headers = ["Department", "Scheduled", "Completed", "Cancelled"];
- const rows = TABLE_ROWS.map(r =>
- [r.dept, r.scheduled, r.completed, r.cancelled].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
- );
- const csv = [headers.join(","),...rows].join("\n");
- const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
- const link = document.createElement("a");
- link.href = URL.createObjectURL(blob);
- link.download = "appointment-analytics-report.csv";
- link.click();
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-function downloadCanvas(canvasRef, filename) {
- const link = document.createElement("a");
- link.download = filename;
- link.href = canvasRef.current.toDataURL("image/png");
- link.click();
+function downloadTextFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
-export default function AppointmentAnalytics() {
- const barRef = useRef(null);
- const lineRef = useRef(null);
-
- useBarChart(barRef);
- useLineChart(lineRef);
-
- function downloadCharts() {
- downloadCanvas(barRef, "appointment-analytics-chart-1.png");
- setTimeout(() => downloadCanvas(lineRef, "appointment-analytics-chart-2.png"), 300);
- }
-
- return (
- <div style={{ fontFamily: "Arial, Helvetica, sans-serif", background: "#e5e7eb", color: "#111827", minHeight: "100vh" }}>
-
- <div style={{ background: "#163b6b", color: "#fff", padding: "18px 22px", display: "flex", alignItems: "center", justifyContent: "center", position: "sticky", top: 0, zIndex: 10, fontWeight: 700, fontSize: "1.9rem" }}>
- <a href="#" style={{ position: "absolute", left: 20, color: "#fff", textDecoration: "none", fontSize: "1rem", fontWeight: 700 }}>{"<- Back"}</a>
- Analytics Reports
- </div>
-
- <div style={{ width: "min(1180px, 94%)", margin: "26px auto 40px" }}>
-
- {/* Header */}
- <div style={{ textAlign: "center", marginBottom: 20 }}>
- <h1 style={{ fontSize: "2rem", marginBottom: 8 }}>Appointment Analytics Report</h1>
- <p style={{ color: "#334155", fontSize: "1.02rem" }}>Monthly and daily appointment trends and activity.</p>
- </div>
-
- {/* Toolbar */}
- <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", margin: "20px 0 24px" }}>
- <ToolBtn onClick={() => window.print()}>Print / Export PDF</ToolBtn>
- <ToolBtn onClick={exportTableCSV}>Export Table CSV</ToolBtn>
- <ToolBtn onClick={downloadCharts}>Download Charts</ToolBtn>
- </div>
-
- {/* Summary Cards */}
- <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 20 }}>
- {SUMMARY_CARDS.map(card => (
- <div key={card.label} style={{ background: "#f8fafc", borderRadius: 14, padding: 18, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", borderLeft: "6px solid #163b6b" }}>
- <h3 style={{ fontSize: "0.98rem", color: "#475569", marginBottom: 8 }}>{card.label}</h3>
- <div style={{ fontSize: "1.9rem", fontWeight: 700, color: "#0f172a" }}>{card.value}</div>
- </div>
- ))}
- </div>
-
- {/* Charts */}
- <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 18, marginBottom: 20 }}>
- <div style={chartCard}>
- <h2 style={chartTitle}>Monthly Appointment Trend</h2>
- <div style={{ position: "relative", height: 320 }}>
- <canvas ref={barRef} />
- </div>
- </div>
- <div style={chartCard}>
- <h2 style={chartTitle}>Daily Appointment Activity</h2>
- <div style={{ position: "relative", height: 320 }}>
- <canvas ref={lineRef} />
- </div>
- </div>
- </div>
-
- {/* Table */}
- <div style={chartCard}>
- <h2 style={chartTitle}>Detailed Report View</h2>
- <table style={{ width: "100%", borderCollapse: "collapse" }}>
- <thead>
- <tr>
- {["Department", "Scheduled", "Completed", "Cancelled"].map(h => (
- <th key={h} style={{ padding: 12, borderBottom: "1px solid #dbe3ea", textAlign: "left", fontSize: "0.96rem", background: "#edf2f7", color: "#163b6b" }}>{h}</th>
- ))}
- </tr>
- </thead>
- <tbody>
- {TABLE_ROWS.map(row => (
- <tr key={row.dept}>
- <td style={td}>{row.dept}</td>
- <td style={td}>{row.scheduled}</td>
- <td style={td}>{row.completed}</td>
- <td style={td}>{row.cancelled}</td>
- </tr>
- ))}
- </tbody>
- </table>
- </div>
-
- {/* Footer */}
- <div style={{ textAlign: "center", color: "#64748b", marginTop: 14, fontSize: "0.95rem" }}>
- This is a viewable and exportable sample analytics report page for a hospital management system.
- </div>
- </div>
- </div>
- );
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
 }
 
-function ToolBtn({ onClick, children }) {
- const [hovered, setHovered] = React.useState(false);
- return (
- <button
- onClick={onClick}
- onMouseEnter={() => setHovered(true)}
- onMouseLeave={() => setHovered(false)}
- style={{ border: "none", background: hovered ? "#0f2f57" : "#163b6b", color: "#fff", padding: "12px 18px", borderRadius: 8, fontWeight: 700, cursor: "pointer", transition: "background 0.2s" }}
- >
- {children}
- </button>
- );
+function buildCsv(data) {
+  const metrics = data?.metrics || {};
+  const departments = data?.charts?.departments || [];
+  const apptDays = data?.charts?.appointments_by_day || [];
+  const queueDays = data?.charts?.queue_by_day || [];
+  const lines = [];
+
+  lines.push("Section,Metric,Value");
+  lines.push(["Metrics", "Total appointments", num(metrics.total_appointments)].map(csvCell).join(","));
+  lines.push(["Metrics", "Completed visits", num(metrics.completed_visits)].map(csvCell).join(","));
+  lines.push(["Metrics", "Queue entries", num(metrics.queue_entries)].map(csvCell).join(","));
+  lines.push(["Metrics", "Completion rate", `${percent(num(metrics.completed_visits), num(metrics.total_appointments))}%`].map(csvCell).join(","));
+  lines.push("");
+  lines.push("Department,Appointments,Completed");
+  departments.forEach((row) => {
+    lines.push([row.department, num(row.total), num(row.completed)].map(csvCell).join(","));
+  });
+  lines.push("");
+  lines.push("Day,Appointments,Queue entries");
+  apptDays.forEach((row) => {
+    const queue = queueDays.find((q) => q.day_name === row.day_name);
+    lines.push([row.day_name, num(row.total), num(queue?.total)].map(csvCell).join(","));
+  });
+
+  return lines.join("\n");
 }
 
-const chartCard = {
- background: "#f8fafc", borderRadius: 14, padding: 18,
- boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
-};
+function buildPrintableReport(data) {
+  const range = data?.range || {};
+  const metrics = data?.metrics || {};
+  const report = data?.report || {};
+  const departments = data?.charts?.departments || [];
+  const apptDays = data?.charts?.appointments_by_day || [];
+  const queueDays = data?.charts?.queue_by_day || [];
+  const completionRate = percent(num(metrics.completed_visits), num(metrics.total_appointments));
+  const sourceLabel = data?.source === "ollama" ? "Ollama" : "Built-in fallback";
 
-const chartTitle = {
- fontSize: "1.2rem", marginBottom: 14, color: "#163b6b",
-};
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>QELCare Appointment Analytics Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #172033; margin: 36px; }
+    h1 { color: #123b6d; margin: 0 0 6px; }
+    h2 { color: #123b6d; margin-top: 28px; }
+    .muted { color: #607083; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
+    .card { border: 1px solid #d9e2ec; border-left: 5px solid #123b6d; padding: 14px; border-radius: 6px; }
+    .label { color: #607083; font-size: 12px; text-transform: uppercase; }
+    .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #d9e2ec; padding: 8px; text-align: left; }
+    th { background: #eef4fb; color: #123b6d; }
+    li { margin: 6px 0; }
+    @media print { button { display: none; } body { margin: 20mm; } }
+  </style>
+</head>
+<body>
+  <h1>QELCare Appointment Analytics Report</h1>
+  <div class="muted">${escapeHtml(range.label || "Selected period")} (${escapeHtml(range.startDate || "")} to ${escapeHtml(range.endDate || "")})</div>
+  <div class="muted">Generated by: ${escapeHtml(sourceLabel)}</div>
 
-const td = {
- padding: 12, borderBottom: "1px solid #dbe3ea",
- textAlign: "left", fontSize: "0.96rem",
+  <div class="grid">
+    <div class="card"><div class="label">Appointments</div><div class="value">${num(metrics.total_appointments)}</div></div>
+    <div class="card"><div class="label">Completed</div><div class="value">${num(metrics.completed_visits)}</div></div>
+    <div class="card"><div class="label">Queue Entries</div><div class="value">${num(metrics.queue_entries)}</div></div>
+    <div class="card"><div class="label">Completion Rate</div><div class="value">${completionRate}%</div></div>
+  </div>
+
+  <h2>AI Insight</h2>
+  <p>${escapeHtml(report.summary || "No generated summary available.")}</p>
+  <ul>${(report.bullets || []).map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul>
+  <p><strong>${escapeHtml(report.recommendation || "")}</strong></p>
+
+  <h2>Department Demand</h2>
+  <table>
+    <thead><tr><th>Department</th><th>Appointments</th><th>Completed</th></tr></thead>
+    <tbody>${departments.map((row) => `<tr><td>${escapeHtml(row.department)}</td><td>${num(row.total)}</td><td>${num(row.completed)}</td></tr>`).join("")}</tbody>
+  </table>
+
+  <h2>Daily Activity</h2>
+  <table>
+    <thead><tr><th>Day</th><th>Appointments</th><th>Queue Entries</th></tr></thead>
+    <tbody>${apptDays.map((row) => {
+      const queue = queueDays.find((q) => q.day_name === row.day_name);
+      return `<tr><td>${escapeHtml(row.day_name)}</td><td>${num(row.total)}</td><td>${num(queue?.total)}</td></tr>`;
+    }).join("")}</tbody>
+  </table>
+
+  <script>
+    window.addEventListener("load", function () {
+      setTimeout(function () { window.print(); }, 250);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function MetricCard({ label, value, detail }) {
+  return (
+    <div style={styles.metricCard}>
+      <div style={styles.metricLabel}>{label}</div>
+      <div style={styles.metricValue}>{value}</div>
+      {detail ? <div style={styles.metricDetail}>{detail}</div> : null}
+    </div>
+  );
+}
+
+function MiniBars({ title, rows, labelKey = "day_name", valueKey = "total", emptyText }) {
+  const max = Math.max(...rows.map((row) => num(row[valueKey])), 1);
+
+  return (
+    <section style={styles.panel}>
+      <h2 style={styles.panelTitle}>{title}</h2>
+      {rows.length === 0 || rows.every((row) => num(row[valueKey]) === 0) ? (
+        <div style={styles.empty}>{emptyText || "No data for this period."}</div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {rows.map((row) => {
+            const value = num(row[valueKey]);
+            const width = Math.max(6, Math.round((value / max) * 100));
+            return (
+              <div key={`${row[labelKey]}-${value}`} style={styles.barRow}>
+                <div style={styles.barLabel}>{row[labelKey]}</div>
+                <div style={styles.barTrack}>
+                  <div style={{ ...styles.barFill, width: `${width}%` }} />
+                </div>
+                <div style={styles.barValue}>{value}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SourceBadge({ source }) {
+  const isOllama = source === "ollama";
+  return (
+    <span style={{ ...styles.sourceBadge, background: isOllama ? "#e8f7ef" : "#fff7df", color: isOllama ? "#176b3a" : "#8a5a00" }}>
+      {isOllama ? "Ollama" : "Built-in fallback"}
+    </span>
+  );
+}
+
+export default function AppointmentAnalyticsReport() {
+  const navigate = useNavigate();
+  const [range, setRange] = useState("past_7_days");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await authFetch(`/analytics/ai-insights?range=${encodeURIComponent(range)}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || "Failed to load analytics report.");
+      }
+      setData(payload.data);
+    } catch (err) {
+      setError(err.message || "Failed to load analytics report.");
+    } finally {
+      setLoading(false);
+    }
+  }, [range]);
+
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
+  const metrics = data?.metrics || {};
+  const departments = data?.charts?.departments || [];
+  const appointmentDays = data?.charts?.appointments_by_day || [];
+  const queueDays = data?.charts?.queue_by_day || [];
+  const report = data?.report || {};
+
+  const completionRate = useMemo(
+    () => percent(num(metrics.completed_visits), num(metrics.total_appointments)),
+    [metrics.completed_visits, metrics.total_appointments]
+  );
+
+  function downloadPdf() {
+    if (!data) return;
+    const popup = window.open("", "_blank", "width=1000,height=800");
+    if (!popup) {
+      setError("Popup blocked. Allow popups, then click Download PDF again.");
+      return;
+    }
+    popup.document.open();
+    popup.document.write(buildPrintableReport(data));
+    popup.document.close();
+  }
+
+  function downloadCsv() {
+    if (!data) return;
+    downloadTextFile("qelcare-appointment-analytics.csv", buildCsv(data), "text/csv;charset=utf-8");
+  }
+
+  return (
+    <div style={styles.page}>
+      <header style={styles.topbar}>
+        <button type="button" onClick={() => navigate(-1)} style={styles.backButton}>
+          {"<- Back"}
+        </button>
+        <div>
+          <h1 style={styles.title}>Appointment Analytics</h1>
+          <p style={styles.subtitle}>Live appointment, queue, department, and AI insight report.</p>
+        </div>
+      </header>
+
+      <main style={styles.container}>
+        <section style={styles.toolbar}>
+          <label style={styles.fieldLabel}>
+            Report period
+            <select value={range} onChange={(event) => setRange(event.target.value)} style={styles.select}>
+              {RANGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div style={styles.actions}>
+            <button type="button" onClick={loadReport} disabled={loading} style={styles.primaryButton}>
+              {loading ? "Generating..." : "Generate AI Insights"}
+            </button>
+            <button type="button" onClick={downloadPdf} disabled={!data || loading} style={styles.secondaryButton}>
+              Download PDF
+            </button>
+            <button type="button" onClick={downloadCsv} disabled={!data || loading} style={styles.secondaryButton}>
+              Export CSV
+            </button>
+          </div>
+        </section>
+
+        {error ? <div style={styles.error}>{error}</div> : null}
+
+        {loading && !data ? (
+          <div style={styles.loading}>Loading report...</div>
+        ) : (
+          <>
+            <section style={styles.metricGrid}>
+              <MetricCard label="Appointments" value={num(metrics.total_appointments)} detail={data?.range?.label || "Selected period"} />
+              <MetricCard label="Completed Visits" value={num(metrics.completed_visits)} detail={`${completionRate}% completion rate`} />
+              <MetricCard label="Queue Entries" value={num(metrics.queue_entries)} detail="Patients routed through clinic queue" />
+              <MetricCard label="Active Exceptions" value={num(metrics.cancelled_appointments) + num(metrics.no_show_appointments) + num(metrics.rescheduled_appointments)} detail="Cancelled, no-show, rescheduled" />
+            </section>
+
+            <section style={styles.panel}>
+              <div style={styles.panelHeader}>
+                <div>
+                  <h2 style={styles.panelTitle}>Generated Report</h2>
+                  <p style={styles.panelHint}>
+                    {data?.range ? `${data.range.startDate} to ${data.range.endDate}` : "No period loaded yet."}
+                  </p>
+                </div>
+                {data?.source ? <SourceBadge source={data.source} /> : null}
+              </div>
+
+              {data?.fallback_reason ? (
+                <div style={styles.warning}>Ollama fallback reason: {data.fallback_reason}</div>
+              ) : null}
+
+              {report.summary ? (
+                <>
+                  <p style={styles.summary}>{report.summary}</p>
+                  <ul style={styles.bulletList}>
+                    {(report.bullets || []).map((bullet, index) => (
+                      <li key={`${bullet}-${index}`}>{bullet}</li>
+                    ))}
+                  </ul>
+                  <p style={styles.recommendation}>{report.recommendation}</p>
+                </>
+              ) : (
+                <div style={styles.empty}>No generated report yet.</div>
+              )}
+            </section>
+
+            <div style={styles.gridTwo}>
+              <MiniBars
+                title="Department Demand"
+                rows={departments}
+                labelKey="department"
+                valueKey="total"
+                emptyText="No department appointment data for this period."
+              />
+              <MiniBars
+                title="Queue Activity by Day"
+                rows={queueDays}
+                labelKey="day_name"
+                valueKey="total"
+                emptyText="No queue entries for this period."
+              />
+            </div>
+
+            <section style={styles.panel}>
+              <h2 style={styles.panelTitle}>Daily Appointment Activity</h2>
+              <div style={styles.tableWrap}>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>Day</th>
+                      <th style={styles.th}>Appointments</th>
+                      <th style={styles.th}>Queue Entries</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {appointmentDays.map((row) => {
+                      const queue = queueDays.find((q) => q.day_name === row.day_name);
+                      return (
+                        <tr key={row.day_name}>
+                          <td style={styles.td}>{row.day_name}</td>
+                          <td style={styles.td}>{num(row.total)}</td>
+                          <td style={styles.td}>{num(queue?.total)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#eef3f8",
+    color: "#172033",
+    fontFamily: "Arial, Helvetica, sans-serif",
+  },
+  topbar: {
+    background: "#123b6d",
+    color: "#ffffff",
+    padding: "18px 24px",
+    display: "flex",
+    alignItems: "center",
+    gap: 18,
+    boxShadow: "0 8px 18px rgba(18, 59, 109, 0.18)",
+  },
+  backButton: {
+    border: "1px solid rgba(255,255,255,0.35)",
+    background: "rgba(255,255,255,0.1)",
+    color: "#ffffff",
+    borderRadius: 6,
+    padding: "9px 12px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  title: {
+    margin: 0,
+    fontSize: 28,
+    lineHeight: 1.1,
+  },
+  subtitle: {
+    margin: "4px 0 0",
+    color: "#dbeafe",
+    fontSize: 14,
+  },
+  container: {
+    width: "min(1180px, 94vw)",
+    margin: "24px auto 42px",
+  },
+  toolbar: {
+    background: "#ffffff",
+    border: "1px solid #d9e4ef",
+    borderRadius: 8,
+    padding: 16,
+    display: "flex",
+    alignItems: "end",
+    justifyContent: "space-between",
+    gap: 14,
+    flexWrap: "wrap",
+    marginBottom: 18,
+  },
+  fieldLabel: {
+    display: "grid",
+    gap: 6,
+    fontSize: 13,
+    color: "#475569",
+    fontWeight: 700,
+  },
+  select: {
+    minWidth: 190,
+    border: "1px solid #cbd5e1",
+    borderRadius: 6,
+    padding: "10px 12px",
+    background: "#ffffff",
+    color: "#172033",
+  },
+  actions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  primaryButton: {
+    border: "none",
+    background: "#123b6d",
+    color: "#ffffff",
+    borderRadius: 6,
+    padding: "11px 14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  secondaryButton: {
+    border: "1px solid #b9c7d6",
+    background: "#ffffff",
+    color: "#123b6d",
+    borderRadius: 6,
+    padding: "10px 14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  error: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: "12px 14px",
+    marginBottom: 16,
+  },
+  warning: {
+    background: "#fff7df",
+    color: "#7a4a00",
+    border: "1px solid #ffe1a3",
+    borderRadius: 6,
+    padding: "10px 12px",
+    marginBottom: 14,
+    fontSize: 13,
+  },
+  loading: {
+    background: "#ffffff",
+    border: "1px solid #d9e4ef",
+    borderRadius: 8,
+    padding: 28,
+    textAlign: "center",
+    color: "#475569",
+  },
+  metricGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: 14,
+    marginBottom: 16,
+  },
+  metricCard: {
+    background: "#ffffff",
+    border: "1px solid #d9e4ef",
+    borderLeft: "5px solid #123b6d",
+    borderRadius: 8,
+    padding: 16,
+  },
+  metricLabel: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+  },
+  metricValue: {
+    color: "#172033",
+    fontSize: 30,
+    fontWeight: 800,
+    marginTop: 4,
+  },
+  metricDetail: {
+    color: "#64748b",
+    fontSize: 13,
+    marginTop: 4,
+  },
+  panel: {
+    background: "#ffffff",
+    border: "1px solid #d9e4ef",
+    borderRadius: 8,
+    padding: 18,
+    marginBottom: 16,
+  },
+  panelHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+  panelTitle: {
+    margin: 0,
+    color: "#123b6d",
+    fontSize: 20,
+  },
+  panelHint: {
+    margin: "4px 0 0",
+    color: "#64748b",
+    fontSize: 13,
+  },
+  sourceBadge: {
+    borderRadius: 999,
+    padding: "7px 10px",
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  },
+  summary: {
+    margin: "0 0 12px",
+    lineHeight: 1.55,
+    color: "#263548",
+  },
+  bulletList: {
+    margin: "0 0 14px 20px",
+    padding: 0,
+    lineHeight: 1.55,
+  },
+  recommendation: {
+    margin: 0,
+    background: "#eef6ff",
+    borderLeft: "4px solid #123b6d",
+    borderRadius: 6,
+    padding: "12px 14px",
+    color: "#123b6d",
+    fontWeight: 700,
+  },
+  gridTwo: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: 16,
+  },
+  empty: {
+    color: "#64748b",
+    padding: "14px 0",
+  },
+  barRow: {
+    display: "grid",
+    gridTemplateColumns: "120px 1fr 42px",
+    alignItems: "center",
+    gap: 10,
+  },
+  barLabel: {
+    color: "#34475c",
+    fontSize: 13,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  barTrack: {
+    height: 12,
+    background: "#e8eef5",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    background: "#123b6d",
+    borderRadius: 999,
+  },
+  barValue: {
+    color: "#172033",
+    fontSize: 13,
+    fontWeight: 800,
+    textAlign: "right",
+  },
+  tableWrap: {
+    overflowX: "auto",
+  },
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+  },
+  th: {
+    background: "#eef4fb",
+    color: "#123b6d",
+    textAlign: "left",
+    padding: 10,
+    borderBottom: "1px solid #d9e4ef",
+    fontSize: 13,
+  },
+  td: {
+    padding: 10,
+    borderBottom: "1px solid #edf2f7",
+    color: "#263548",
+    fontSize: 14,
+  },
 };

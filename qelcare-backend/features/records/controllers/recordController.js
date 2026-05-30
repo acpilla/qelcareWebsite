@@ -18,9 +18,23 @@ async function writeLog(req, payload) {
   }
 }
 
+function assertDoctorOwnsRecord(req, record) {
+  if (req.user?.role !== "Doctor") return;
+  const recordDoctorId = Number(record.doctor_id || 0);
+  if (recordDoctorId && recordDoctorId !== Number(req.user.user_id)) {
+    const err = new Error("Doctors can only update their own medical records.");
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
 const recordController = {
   async create(req, res) {
     try {
+      if (req.user?.role !== "Doctor") {
+        return res.status(403).json({ success: false, message: "Only doctors can create medical records." });
+      }
+
       const patientId = req.body.patient_id ? Number(req.body.patient_id) : null;
       if (!patientId) {
         return res.status(400).json({ success: false, message: "patient_id is required." });
@@ -34,7 +48,7 @@ const recordController = {
       const record = await MedicalRecord.create({
         ...req.body,
         patient_id: patientId,
-        doctor_id: req.body.doctor_id || req.user.user_id,
+        doctor_id: req.user.user_id,
         created_by: req.user.user_id,
       });
 
@@ -117,10 +131,18 @@ const recordController = {
 
   async update(req, res) {
     try {
+      if (req.user?.role !== "Doctor") {
+        return res.status(403).json({ success: false, message: "Only doctors can update medical records." });
+      }
+
       const current = await MedicalRecord.findById(req.params.id);
       if (!current) return res.status(404).json({ success: false, message: "Medical record not found." });
+      assertDoctorOwnsRecord(req, current);
 
-      const record = await MedicalRecord.update(req.params.id, req.body);
+      const record = await MedicalRecord.update(req.params.id, {
+        ...req.body,
+        doctor_id: current.doctor_id || req.user.user_id,
+      });
       if (!record) return res.status(404).json({ success: false, message: "Medical record not found." });
 
       await writeLog(req, {

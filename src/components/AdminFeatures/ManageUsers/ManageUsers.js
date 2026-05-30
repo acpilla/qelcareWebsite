@@ -74,6 +74,10 @@ function getCurrentUserId() {
   }
 }
 
+function getRoleNameById(roles, roleId) {
+  return roles.find((role) => String(role.role_id) === String(roleId))?.role_name || "";
+}
+
 async function parseApiResponse(response) {
   if (!response) throw new Error("Request was not completed");
   const data = await response.json().catch(() => ({}));
@@ -272,7 +276,7 @@ const inputStyle = {
   minWidth: 0,
 };
 
-function UserModal({ user, roles, mode, onClose, onSave, saving }) {
+function UserModal({ user, roles, specialties, mode, onClose, onSave, saving }) {
   const isEdit = !!user && mode === "edit";
   const isView = !!user && mode === "view";
   const [file, setFile] = useState(null);
@@ -285,13 +289,23 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
     phone: user?.phone || "",
     gender: user?.gender || "",
     role_id: user?.role_id || "",
+    specialty_id: user?.specialty_id || "",
     status: user?.status || "verified",
     password: "",
   }));
 
+  const selectedRoleName = getRoleNameById(roles, form.role_id);
+  const isDoctorRole = selectedRoleName === "Doctor";
+
   const handleChange = (event) => {
     const { name, value } = event.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === "role_id" && getRoleNameById(roles, value) !== "Doctor") {
+        next.specialty_id = "";
+      }
+      return next;
+    });
   };
 
   const submit = (event) => {
@@ -301,9 +315,18 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
     if (isEdit) {
       const updates = {};
       if (String(form.role_id) !== String(user.role_id || "")) updates.role_id = Number(form.role_id);
+      if (String(form.specialty_id || "") !== String(user.specialty_id || "")) {
+        updates.specialty_id = form.specialty_id ? Number(form.specialty_id) : null;
+      }
       if (form.status !== user.status) updates.status = form.status;
+
+      if (isDoctorRole && !form.specialty_id) {
+        setError("Doctor accounts require a specialty so patients can book correctly.");
+        return;
+      }
+
       if (!Object.keys(updates).length) {
-        setError("No role or status changes detected.");
+        setError("No role, specialty, or status changes detected.");
         return;
       }
       onSave(updates, null);
@@ -312,6 +335,11 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
 
     if (!form.username || !form.email || !form.first_name || !form.last_name || !form.role_id || !form.password) {
       setError("Username, email, first name, last name, role, and password are required.");
+      return;
+    }
+
+    if (isDoctorRole && !form.specialty_id) {
+      setError("Doctor accounts require a specialty so patients can book correctly.");
       return;
     }
 
@@ -324,6 +352,7 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
         phone: form.phone.trim() || null,
         gender: form.gender || null,
         role_id: Number(form.role_id),
+        specialty_id: isDoctorRole && form.specialty_id ? Number(form.specialty_id) : null,
         password: form.password,
       },
       file
@@ -372,6 +401,7 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
                 <ReadOnly label="Role" value={user.role || "Unassigned"} />
+                <ReadOnly label="Specialty" value={user.specialty_name || (user.role === "Doctor" ? "Not assigned" : "Not applicable")} />
                 <ReadOnly label="Status" value={statusLabel(user.status).label} />
                 <ReadOnly label="Phone" value={user.phone || "Not set"} />
                 <ReadOnly label="Gender" value={user.gender || "Not set"} />
@@ -431,6 +461,25 @@ function UserModal({ user, roles, mode, onClose, onSave, saving }) {
                       <option key={role.role_id} value={role.role_id}>{role.role_name}</option>
                     ))}
                   </select>
+                </Field>
+                <Field label="Specialty">
+                  <select
+                    name="specialty_id"
+                    value={form.specialty_id}
+                    onChange={handleChange}
+                    disabled={!isDoctorRole}
+                    style={{ ...inputStyle, opacity: isDoctorRole ? 1 : 0.7 }}
+                  >
+                    <option value="">{isDoctorRole ? "Select specialty" : "Doctors only"}</option>
+                    {specialties.map((specialty) => (
+                      <option key={specialty.specialty_id} value={specialty.specialty_id}>
+                        {specialty.specialty_name}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: isDoctorRole ? C.warn : C.muted, fontWeight: 700 }}>
+                    {isDoctorRole ? "Required for Doctor accounts and patient booking." : "Only Doctor accounts need a specialty."}
+                  </div>
                 </Field>
                 {isEdit && (
                   <Field label="Status">
@@ -524,6 +573,7 @@ const tdStyle = { padding: "13px 14px", color: C.text, fontSize: 13, verticalAli
 export default function ManageUsers() {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [specialties, setSpecialties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -545,14 +595,17 @@ export default function ManageUsers() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersResponse, rolesResponse] = await Promise.all([
+      const [usersResponse, rolesResponse, specialtiesResponse] = await Promise.all([
         authFetch("/users"),
         authFetch("/users/roles"),
+        authFetch("/queue/specialties"),
       ]);
       const usersData = await parseApiResponse(usersResponse);
       const rolesData = await parseApiResponse(rolesResponse);
+      const specialtiesData = await parseApiResponse(specialtiesResponse);
       setUsers(Array.isArray(usersData.data) ? usersData.data : []);
       setRoles(Array.isArray(rolesData.data) ? rolesData.data : []);
+      setSpecialties(Array.isArray(specialtiesData.data) ? specialtiesData.data : specialtiesData.specialties || []);
     } catch (error) {
       console.error("Manage users load error:", error);
       showAlert("err", error.message || "Failed to load users");
@@ -616,12 +669,34 @@ export default function ManageUsers() {
     setSaving(true);
     try {
       if (modal?.user) {
-        if (payload.role_id) {
+        const hasRoleUpdate = Object.prototype.hasOwnProperty.call(payload, "role_id");
+        const hasSpecialtyUpdate = Object.prototype.hasOwnProperty.call(payload, "specialty_id");
+        const nextRoleName = hasRoleUpdate ? getRoleNameById(roles, payload.role_id) : modal.user.role;
+
+        const updateRole = async () => {
+          if (!hasRoleUpdate) return;
           await parseApiResponse(await authFetch(`/users/${modal.user.user_id}/role`, {
             method: "PATCH",
             body: JSON.stringify({ role_id: payload.role_id }),
           }));
+        };
+
+        const updateSpecialty = async () => {
+          if (!hasSpecialtyUpdate) return;
+          await parseApiResponse(await authFetch(`/users/${modal.user.user_id}/details`, {
+            method: "PATCH",
+            body: JSON.stringify({ specialty_id: payload.specialty_id }),
+          }));
+        };
+
+        if (hasRoleUpdate && nextRoleName !== "Doctor") {
+          await updateRole();
+          await updateSpecialty();
+        } else {
+          await updateSpecialty();
+          await updateRole();
         }
+
         if (payload.status) {
           await parseApiResponse(await authFetch(`/users/${modal.user.user_id}/status`, {
             method: "PATCH",
@@ -793,6 +868,7 @@ export default function ManageUsers() {
           user={modal.user}
           mode={modal.mode}
           roles={roles}
+          specialties={specialties}
           saving={saving}
           onClose={() => setModal(null)}
           onSave={handleSave}
