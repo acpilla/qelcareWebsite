@@ -1,13 +1,22 @@
 const db = require("../../../config/database");
 
-const VALID_QUEUE_STATUSES = ["WAITING", "IN_PROGRESS", "DONE", "SKIPPED"];
+const VALID_QUEUE_STATUSES = ["WAITING", "CALLED", "IN_PROGRESS", "DONE", "SKIPPED", "NO_SHOW", "CANCELLED"];
+const FINAL_QUEUE_STATUSES = ["DONE", "NO_SHOW", "CANCELLED"];
 
 function normalizeStatus(status) {
   return String(status || "").trim().toUpperCase();
 }
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function appError(statusCode, message) {
@@ -55,7 +64,7 @@ async function findEntryById(queueId, client = db) {
      JOIN patients p ON a.patient_id = p.id
      JOIN users u ON a.doctor_id = u.user_id
      JOIN specialties s ON q.specialty_id = s.specialty_id
-     WHERE q.queue_id = $1`,
+     WHERE q.queue_id = $1::integer`,
     [queueId]
   );
 
@@ -68,6 +77,9 @@ const Queue = {
   },
 
   async getSpecialties(date = todayISO()) {
+    const targetDate = date || todayISO();
+    await this.autoEnqueueConfirmed(targetDate);
+
     const result = await db.query(
       `SELECT
          s.specialty_id,
@@ -77,9 +89,12 @@ const Queue = {
          s.is_active,
          COUNT(q.queue_id)::int AS total,
          COUNT(q.queue_id) FILTER (WHERE q.status = 'WAITING')::int AS waiting,
-         COUNT(q.queue_id) FILTER (WHERE q.status = 'IN_PROGRESS')::int AS in_progress,
+         COUNT(q.queue_id) FILTER (WHERE q.status IN ('CALLED', 'IN_PROGRESS'))::int AS in_progress,
+         COUNT(q.queue_id) FILTER (WHERE q.status = 'CALLED')::int AS called,
          COUNT(q.queue_id) FILTER (WHERE q.status = 'SKIPPED')::int AS skipped,
-         COUNT(q.queue_id) FILTER (WHERE q.status = 'DONE')::int AS done
+         COUNT(q.queue_id) FILTER (WHERE q.status = 'DONE')::int AS done,
+         COUNT(q.queue_id) FILTER (WHERE q.status = 'NO_SHOW')::int AS no_show,
+         COUNT(q.queue_id) FILTER (WHERE q.status = 'CANCELLED')::int AS cancelled
        FROM specialties s
        LEFT JOIN queue_entries q
          ON q.specialty_id = s.specialty_id
@@ -87,13 +102,16 @@ const Queue = {
        WHERE COALESCE(s.is_active, true) = true
        GROUP BY s.specialty_id, s.specialty_name, s.slug, s.display_order, s.is_active
        ORDER BY COALESCE(s.display_order, 0), s.specialty_name`,
-      [date || todayISO()]
+      [targetDate]
     );
 
     return result.rows;
   },
 
   async findBySpecialtyAndDate(specialtyId, date = todayISO()) {
+    const targetDate = date || todayISO();
+    await this.autoEnqueueConfirmed(targetDate);
+
     const result = await db.query(
       `SELECT
          q.queue_id,
@@ -131,19 +149,22 @@ const Queue = {
        JOIN patients p ON a.patient_id = p.id
        JOIN users u ON a.doctor_id = u.user_id
        JOIN specialties s ON q.specialty_id = s.specialty_id
-       WHERE q.specialty_id = $1
+       WHERE q.specialty_id = $1::integer
          AND q.queue_date = $2::date
        ORDER BY
          CASE q.status
            WHEN 'IN_PROGRESS' THEN 1
-           WHEN 'WAITING' THEN 2
-           WHEN 'SKIPPED' THEN 3
-           WHEN 'DONE' THEN 4
-           ELSE 5
+           WHEN 'CALLED' THEN 2
+           WHEN 'WAITING' THEN 3
+           WHEN 'SKIPPED' THEN 4
+           WHEN 'DONE' THEN 5
+           WHEN 'NO_SHOW' THEN 6
+           WHEN 'CANCELLED' THEN 7
+           ELSE 8
          END,
          q.priority DESC,
          q.queue_number ASC`,
-      [specialtyId, date || todayISO()]
+      [specialtyId, targetDate]
     );
 
     return result.rows;
@@ -158,7 +179,7 @@ const Queue = {
       const apptResult = await client.query(
         `SELECT id, specialty_id, date, status
          FROM appointments
-         WHERE id = $1
+         WHERE id = $1::integer
          FOR UPDATE`,
         [appointmentId]
       );
@@ -170,17 +191,17 @@ const Queue = {
       const existing = await client.query(
         `SELECT queue_id, status
          FROM queue_entries
-         WHERE appointment_id = $1
+         WHERE appointment_id = $1::integer
          LIMIT 1`,
         [appointmentId]
       );
 
       if (existing.rows[0]) {
-        if (existing.rows[0].status !== "DONE" && appointment.status !== "IN_QUEUE") {
+        if (!FINAL_QUEUE_STATUSES.includes(existing.rows[0].status) && appointment.status !== "IN_QUEUE") {
           await client.query(
             `UPDATE appointments
              SET status = 'IN_QUEUE', updated_at = NOW()
-             WHERE id = $1`,
+             WHERE id = $1::integer`,
             [appointmentId]
           );
         }
@@ -191,7 +212,7 @@ const Queue = {
       }
 
       if (!["CONFIRMED", "IN_QUEUE"].includes(appointment.status)) {
-        throw appError(400, "Only confirmed or already queued appointments can be added to the queue.");
+        throw appError(400, "Only approved appointments can be added to the queue.");
       }
 
       await client.query("LOCK TABLE queue_entries IN SHARE ROW EXCLUSIVE MODE");
@@ -199,7 +220,7 @@ const Queue = {
       const numberResult = await client.query(
         `SELECT COALESCE(MAX(queue_number), 0) + 1 AS next_number
          FROM queue_entries
-         WHERE specialty_id = $1
+         WHERE specialty_id = $1::integer
            AND queue_date = $2::date`,
         [appointment.specialty_id, appointment.date]
       );
@@ -209,7 +230,7 @@ const Queue = {
       const insertResult = await client.query(
         `INSERT INTO queue_entries
            (appointment_id, specialty_id, queue_number, queue_date, status)
-         VALUES ($1, $2, $3, $4, 'WAITING')
+         VALUES ($1::integer, $2::integer, $3::integer, $4::date, 'WAITING')
          RETURNING queue_id`,
         [appointmentId, appointment.specialty_id, queueNumber, appointment.date]
       );
@@ -217,7 +238,7 @@ const Queue = {
       await client.query(
         `UPDATE appointments
          SET status = 'IN_QUEUE', updated_at = NOW()
-         WHERE id = $1`,
+         WHERE id = $1::integer`,
         [appointmentId]
       );
 
@@ -245,7 +266,7 @@ const Queue = {
       const currentResult = await client.query(
         `SELECT queue_id, appointment_id, status
          FROM queue_entries
-         WHERE queue_id = $1
+         WHERE queue_id = $1::integer
          FOR UPDATE`,
         [queueId]
       );
@@ -256,39 +277,45 @@ const Queue = {
         return null;
       }
 
-      if (current.status === "DONE" && nextStatus !== "DONE") {
-        throw appError(400, "Completed queue entries cannot be reopened.");
+      if (FINAL_QUEUE_STATUSES.includes(current.status) && nextStatus !== current.status) {
+        throw appError(400, "Final queue entries cannot be reopened.");
       }
 
       const updateResult = await client.query(
         `UPDATE queue_entries
-         SET status = $1,
-             notes = COALESCE($2, notes),
+         SET status = $1::varchar,
+             notes = COALESCE($2::text, notes),
              called_at = CASE
-               WHEN $1 = 'IN_PROGRESS' AND called_at IS NULL THEN NOW()
+               WHEN $1::varchar IN ('CALLED', 'IN_PROGRESS') AND called_at IS NULL THEN NOW()
+               WHEN $1::varchar = 'WAITING' THEN NULL
                ELSE called_at
              END,
              started_at = CASE
-               WHEN $1 = 'IN_PROGRESS' THEN NOW()
-               WHEN $1 = 'WAITING' THEN NULL
+               WHEN $1::varchar = 'IN_PROGRESS' THEN NOW()
+               WHEN $1::varchar IN ('WAITING', 'CALLED') THEN NULL
                ELSE started_at
              END,
              completed_at = CASE
-               WHEN $1 = 'DONE' THEN NOW()
-               WHEN $1 IN ('WAITING', 'IN_PROGRESS', 'SKIPPED') THEN NULL
+               WHEN $1::varchar IN ('DONE', 'NO_SHOW', 'CANCELLED') THEN NOW()
+               WHEN $1::varchar IN ('WAITING', 'CALLED', 'IN_PROGRESS', 'SKIPPED') THEN NULL
                ELSE completed_at
              END,
              updated_at = NOW()
-         WHERE queue_id = $3
+         WHERE queue_id = $3::integer
          RETURNING queue_id`,
         [nextStatus, notes || null, queueId]
       );
 
-      const appointmentStatus = nextStatus === "DONE" ? "COMPLETED" : "IN_QUEUE";
+      const appointmentStatus =
+        nextStatus === "DONE" ? "COMPLETED" :
+        nextStatus === "NO_SHOW" ? "NO_SHOW" :
+        nextStatus === "CANCELLED" ? "CANCELLED" :
+        "IN_QUEUE";
+
       await client.query(
         `UPDATE appointments
-         SET status = $1, updated_at = NOW()
-         WHERE id = $2`,
+         SET status = $1::varchar, updated_at = NOW()
+         WHERE id = $2::integer`,
         [appointmentStatus, current.appointment_id]
       );
 
@@ -343,6 +370,8 @@ const Queue = {
   },
 
   async getPublicDisplay() {
+    await this.autoEnqueueConfirmed(todayISO());
+
     const [specs, queue] = await Promise.all([
       db.query(
         `SELECT specialty_id, specialty_name
@@ -372,10 +401,14 @@ const Queue = {
          FROM queue_entries q
          JOIN appointments a ON q.appointment_id = a.id
          JOIN patients p ON a.patient_id = p.id
-         WHERE q.queue_date = CURRENT_DATE
-           AND q.status IN ('WAITING', 'IN_PROGRESS')
+         WHERE q.queue_date = (NOW() AT TIME ZONE 'Asia/Manila')::date
+           AND q.status IN ('WAITING', 'CALLED', 'IN_PROGRESS')
          ORDER BY
-           CASE q.status WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
+           CASE q.status
+             WHEN 'IN_PROGRESS' THEN 1
+             WHEN 'CALLED' THEN 2
+             ELSE 3
+           END,
            q.queue_number ASC`
       ),
     ]);

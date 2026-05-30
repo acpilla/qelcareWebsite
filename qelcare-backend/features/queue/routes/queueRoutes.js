@@ -20,21 +20,15 @@ router.get(
 );
 
 router.post(
-  "/",
-  authorize(["Admin", "Nurse", "Frontdesk"]),
-  ctrl.addToQueue
+  "/auto-enqueue",
+  authorize(["Admin", "Frontdesk"]),
+  ctrl.autoEnqueue
 );
 
 router.patch(
   "/:queueId/status",
   authorize(["Admin", "Nurse", "Doctor", "Frontdesk"]),
   ctrl.updateStatus
-);
-
-router.post(
-  "/auto-enqueue",
-  authorize(["Admin", "Nurse", "Frontdesk"]),
-  ctrl.autoEnqueue
 );
 
 module.exports = router;

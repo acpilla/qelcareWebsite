@@ -20,6 +20,7 @@ const APPOINTMENT_TYPES = [
 
 export default function UserBooking({ onViewAppointments }) {
   const [doctors, setDoctors] = useState([]);
+  const [specialties, setSpecialties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -42,9 +43,9 @@ export default function UserBooking({ onViewAppointments }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to load doctors.");
       setDoctors(payload.doctors || payload.data || []);
+      setSpecialties(payload.specialties || []);
     } catch (err) {
       setError(err.message);
-      setDoctors([]);
     } finally {
       setLoading(false);
     }
@@ -61,14 +62,28 @@ export default function UserBooking({ onViewAppointments }) {
 
   const doctorsBySpecialty = useMemo(() => {
     return doctors.reduce((groups, doctor) => {
-      const name = doctor.specialty_name || "Unassigned";
+      const name = doctor.specialty_name || "Specialty not assigned";
       if (!groups[name]) groups[name] = [];
       groups[name].push(doctor);
       return groups;
     }, {});
   }, [doctors]);
 
-  const canSubmit = Boolean(form.doctor_id && form.date && form.time && !loading && !submitting);
+  const specialtyCards = useMemo(() => {
+    if (specialties.length) {
+      return specialties.map((specialty) => ({
+        ...specialty,
+        doctor_count: Number(specialty.doctor_count || 0),
+      }));
+    }
+
+    return Object.entries(doctorsBySpecialty).map(([specialty_name, group], index) => ({
+      specialty_id: specialty_name,
+      specialty_name,
+      display_order: index + 1,
+      doctor_count: group.length,
+    }));
+  }, [doctorsBySpecialty, specialties]);
 
   function updateField(name, value) {
     if (name === "doctor_id") {
@@ -80,7 +95,6 @@ export default function UserBooking({ onViewAppointments }) {
       }));
       return;
     }
-
     setForm((current) => ({ ...current, [name]: value }));
   }
 
@@ -88,6 +102,11 @@ export default function UserBooking({ onViewAppointments }) {
     event.preventDefault();
     setError("");
     setMessage("");
+
+    if (doctors.length === 0) {
+      setError("No bookable doctors are available. Please contact the clinic.");
+      return;
+    }
 
     if (!form.doctor_id || !form.date || !form.time) {
       setError("Doctor, date, and time are required.");
@@ -110,7 +129,6 @@ export default function UserBooking({ onViewAppointments }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to book appointment.");
-
       setMessage("Appointment booked. It will stay pending until Frontdesk confirms it.");
       setForm((current) => ({ ...current, chief_complaint: "", notes: "" }));
     } catch (err) {
@@ -121,35 +139,29 @@ export default function UserBooking({ onViewAppointments }) {
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px,.9fr)", gap: 16, alignItems: "start" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, .9fr)", gap: 16, alignItems: "start" }}>
       <Panel style={{ padding: 18 }}>
         <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
           <div>
             <div style={{ fontSize: 17, fontWeight: 900, color: "#162235" }}>Book Appointment</div>
-            <div style={{ fontSize: 13, color: "#6b778c", marginTop: 3 }}>Choose a doctor, schedule, and reason for visit.</div>
+            <div style={{ fontSize: 13, color: "#6b778c", marginTop: 3 }}>Choose an available clinic doctor, schedule, and reason for visit.</div>
           </div>
 
           <ErrorState message={error} />
-          {message && (
-            <div style={{ padding: "10px 12px", borderRadius: 8, background: "#edf8f1", color: "#0f6b3c", fontSize: 13, fontWeight: 800 }}>
-              {message}
-            </div>
-          )}
+          {message && <div style={{ padding: "10px 12px", borderRadius: 8, background: "#edf8f1", color: "#0f6b3c", fontSize: 13, fontWeight: 800 }}>{message}</div>}
 
           {loading ? (
             <LoadingState label="Loading available doctors..." />
-          ) : doctors.length === 0 ? (
-            <EmptyState title="No doctors available" detail="Admin must assign verified doctor accounts to active specialties." />
           ) : (
             <>
               <Field label="Doctor">
-                <select style={inputStyle} value={form.doctor_id} onChange={(e) => updateField("doctor_id", e.target.value)}>
+                <select style={inputStyle} value={form.doctor_id} onChange={(e) => updateField("doctor_id", e.target.value)} disabled={doctors.length === 0}>
                   <option value="">Select doctor</option>
                   {Object.entries(doctorsBySpecialty).map(([specialty, group]) => (
                     <optgroup key={specialty} label={specialty}>
                       {group.map((doctor) => (
                         <option key={doctor.user_id} value={doctor.user_id}>
-                          {doctor.doctor_name || `${doctor.first_name} ${doctor.last_name}`} ({doctor.specialty_name || "No specialty"})
+                          {doctor.doctor_name || `${doctor.first_name} ${doctor.last_name}`} ({doctor.specialty_name})
                         </option>
                       ))}
                     </optgroup>
@@ -160,8 +172,12 @@ export default function UserBooking({ onViewAppointments }) {
               {selectedDoctor && (
                 <div style={{ padding: 12, borderRadius: 8, background: "#f7fafd", border: "1px solid #e3ebf5", color: "#42526a", fontSize: 13 }}>
                   <strong style={{ color: "#162235" }}>{selectedDoctor.doctor_name || `${selectedDoctor.first_name} ${selectedDoctor.last_name}`}</strong>
-                  <div>{selectedDoctor.specialty_name || "Specialty not assigned"}</div>
+                  <div>{selectedDoctor.specialty_name}</div>
                 </div>
+              )}
+
+              {!selectedDoctor && doctors.length === 0 && (
+                <EmptyState title="No bookable doctors" detail="Admin must create or update a verified Doctor account with a specialty assignment." />
               )}
             </>
           )}
@@ -201,37 +217,39 @@ export default function UserBooking({ onViewAppointments }) {
           </Field>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <ActionButton type="submit" disabled={!canSubmit}>
-              {submitting ? "Booking..." : "Book Appointment"}
-            </ActionButton>
+            <ActionButton type="submit" disabled={loading || submitting || doctors.length === 0}>{submitting ? "Booking..." : "Book Appointment"}</ActionButton>
             <ActionButton tone="secondary" onClick={onViewAppointments || (() => { window.location.href = "/patient/appointments"; })}>
               View Appointments
             </ActionButton>
           </div>
-
-          {!form.doctor_id && !loading && doctors.length > 0 && (
-            <div style={{ color: "#6b778c", fontSize: 12, fontWeight: 700 }}>
-              Select a doctor to enable booking.
-            </div>
-          )}
         </form>
       </Panel>
 
       <Panel style={{ padding: 18 }}>
-        <div style={{ fontSize: 15, fontWeight: 900, color: "#162235" }}>Available Specialties</div>
-        <div style={{ fontSize: 12, color: "#6b778c", marginTop: 2, marginBottom: 12 }}>Available doctors are grouped by active clinic specialty.</div>
+        <div style={{ fontSize: 15, fontWeight: 900, color: "#162235" }}>Clinic Specialty Coverage</div>
+        <div style={{ fontSize: 12, color: "#6b778c", marginTop: 2, marginBottom: 12 }}>Departments become bookable when a verified doctor is assigned by admin.</div>
         {loading ? (
           <LoadingState />
-        ) : doctors.length === 0 ? (
-          <EmptyState title="No doctors available" detail="Admin must assign verified doctor accounts to specialties." />
+        ) : specialtyCards.length === 0 ? (
+          <EmptyState title="No active specialties" detail="Admin must set active specialties before patients can book." />
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {Object.entries(doctorsBySpecialty).map(([specialty, group]) => (
-              <div key={specialty} style={{ border: "1px solid #e3ebf5", borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 900, color: "#162235" }}>{specialty}</div>
-                <div style={{ color: "#6b778c", fontSize: 12 }}>{group.length} doctor(s)</div>
+            {specialtyCards.map((specialty) => {
+              const hasDoctors = Number(specialty.doctor_count || 0) > 0;
+              return (
+              <div key={specialty.specialty_id || specialty.specialty_name} style={{ border: `1px solid ${hasDoctors ? "#e3ebf5" : "#f0d7c2"}`, borderRadius: 8, padding: 12, background: hasDoctors ? "#fff" : "#fff8f3" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                  <div style={{ fontWeight: 900, color: "#162235" }}>{specialty.specialty_name}</div>
+                  <span style={{ borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 900, color: hasDoctors ? "#0f6b3c" : "#9a6500", background: hasDoctors ? "#eaf7ef" : "#fff0d5" }}>
+                    {hasDoctors ? "Bookable" : "Needs doctor"}
+                  </span>
+                </div>
+                <div style={{ color: "#6b778c", fontSize: 12, marginTop: 4 }}>
+                  {Number(specialty.doctor_count || 0)} verified doctor(s)
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Panel>

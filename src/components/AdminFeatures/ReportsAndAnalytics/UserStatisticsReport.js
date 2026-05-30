@@ -1,348 +1,550 @@
-import React, { useEffect, useRef } from "react";
-import { Chart, registerables } from "chart.js";
-Chart.register(...registerables);
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { authFetch } from "../../../utils/auth";
+
+const C = {
+  navy: "#163b6b",
+  navyDark: "#102f57",
+  blue: "#2f6fed",
+  teal: "#1f7a52",
+  amber: "#a56a00",
+  red: "#b94949",
+  text: "#17212b",
+  muted: "#66758a",
+  line: "#d8e2ee",
+  soft: "#f4f7fb",
+  white: "#ffffff",
+};
+
+function intValue(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pct(part, total) {
+  if (!total) return "0%";
+  return `${Math.round((intValue(part) / intValue(total)) * 100)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function downloadTextFile(filename, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function normalizeRole(row) {
+  const total = intValue(row.total);
+  const active = intValue(row.active);
+  const deactivated = intValue(row.deactivated);
+  return {
+    role_name: row.role_name || "Unknown",
+    total,
+    active,
+    deactivated,
+    other: Math.max(total - active - deactivated, 0),
+  };
+}
+
+function buildCsv(rows, summary) {
+  const lines = [];
+  lines.push(["Metric", "Value"].map(csvCell).join(","));
+  lines.push(["Total users", intValue(summary?.users?.total_users)].map(csvCell).join(","));
+  lines.push(["Verified users", intValue(summary?.users?.active_users)].map(csvCell).join(","));
+  lines.push(["Deactivated users", intValue(summary?.users?.deactivated_users)].map(csvCell).join(","));
+  lines.push(["New users this month", intValue(summary?.users?.new_this_month)].map(csvCell).join(","));
+  lines.push("");
+  lines.push(["Role", "Total", "Verified", "Deactivated", "Other status"].map(csvCell).join(","));
+  rows.forEach((row) => {
+    lines.push([row.role_name, row.total, row.active, row.deactivated, row.other].map(csvCell).join(","));
+  });
+  return lines.join("\n");
+}
+
+function buildPrintableReport(rows, summary) {
+  const users = summary?.users || {};
+  const total = intValue(users.total_users);
+  const active = intValue(users.active_users);
+  const deactivated = intValue(users.deactivated_users);
+  const newThisMonth = intValue(users.new_this_month);
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>QELCare User Statistics Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #17212b; margin: 36px; }
+    h1 { color: #163b6b; margin: 0 0 6px; }
+    h2 { color: #163b6b; margin-top: 28px; }
+    .muted { color: #66758a; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
+    .card { border: 1px solid #d8e2ee; border-left: 5px solid #163b6b; padding: 14px; border-radius: 6px; }
+    .label { color: #66758a; font-size: 12px; text-transform: uppercase; }
+    .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #d8e2ee; padding: 8px; text-align: left; }
+    th { background: #f4f7fb; color: #163b6b; }
+    @media print { body { margin: 20mm; } }
+  </style>
+</head>
+<body>
+  <h1>QELCare User Statistics Report</h1>
+  <div class="muted">Live account distribution by role and account status.</div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Total Users</div><div class="value">${total}</div></div>
+    <div class="card"><div class="label">Verified Users</div><div class="value">${active}</div></div>
+    <div class="card"><div class="label">Deactivated Users</div><div class="value">${deactivated}</div></div>
+    <div class="card"><div class="label">New This Month</div><div class="value">${newThisMonth}</div></div>
+  </div>
+
+  <h2>Role Distribution</h2>
+  <table>
+    <thead>
+      <tr><th>Role</th><th>Total</th><th>Verified</th><th>Deactivated</th><th>Other Status</th></tr>
+    </thead>
+    <tbody>
+      ${rows.map((row) => `<tr><td>${escapeHtml(row.role_name)}</td><td>${row.total}</td><td>${row.active}</td><td>${row.deactivated}</td><td>${row.other}</td></tr>`).join("")}
+    </tbody>
+  </table>
+
+  <script>
+    window.addEventListener("load", function () {
+      setTimeout(function () { window.print(); }, 250);
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function MetricCard({ label, value, detail, accent = C.navy }) {
+  return (
+    <article style={{ ...styles.metricCard, borderLeftColor: accent }}>
+      <div style={styles.metricLabel}>{label}</div>
+      <div style={styles.metricValue}>{value}</div>
+      {detail ? <div style={styles.metricDetail}>{detail}</div> : null}
+    </article>
+  );
+}
+
+function RoleBars({ rows }) {
+  const max = Math.max(...rows.map((row) => row.total), 1);
+  const visibleRows = rows.filter((row) => row.total > 0);
+
+  return (
+    <section style={styles.panel}>
+      <h2 style={styles.panelTitle}>Role Distribution</h2>
+      {visibleRows.length === 0 ? (
+        <div style={styles.empty}>No user account data found.</div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {visibleRows.map((row) => {
+            const width = Math.max(8, Math.round((row.total / max) * 100));
+            return (
+              <div key={row.role_name}>
+                <div style={styles.barHeader}>
+                  <span style={styles.barLabel}>{row.role_name}</span>
+                  <span style={styles.barValue}>{row.total}</span>
+                </div>
+                <div style={styles.barTrack}>
+                  <div style={{ ...styles.barFill, width: `${width}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export default function UserStatisticsReport() {
+  const navigate = useNavigate();
+  const [roles, setRoles] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [rolesResponse, summaryResponse] = await Promise.all([
+        authFetch("/analytics/users/by-role"),
+        authFetch("/analytics/summary"),
+      ]);
+
+      const rolesPayload = await rolesResponse.json();
+      const summaryPayload = await summaryResponse.json();
+
+      if (!rolesResponse.ok || !rolesPayload.success) {
+        throw new Error(rolesPayload.message || "Failed to load user role analytics.");
+      }
+      if (!summaryResponse.ok || !summaryPayload.success) {
+        throw new Error(summaryPayload.message || "Failed to load analytics summary.");
+      }
+
+      setRoles((rolesPayload.data || []).map(normalizeRole));
+      setSummary(summaryPayload.data || null);
+    } catch (err) {
+      setError(err.message || "Failed to load user statistics report.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadReport();
+  }, [loadReport]);
+
+  const totals = useMemo(() => {
+    const users = summary?.users || {};
+    const total = intValue(users.total_users);
+    const active = intValue(users.active_users);
+    const deactivated = intValue(users.deactivated_users);
+    const newThisMonth = intValue(users.new_this_month);
+    return {
+      total,
+      active,
+      deactivated,
+      newThisMonth,
+      activeRate: pct(active, total),
+    };
+  }, [summary]);
+
+  function downloadCsv() {
+    downloadTextFile("qelcare-user-statistics-report.csv", buildCsv(roles, summary), "text/csv;charset=utf-8");
+  }
+
+  function downloadPdf() {
+    const popup = window.open("", "_blank", "width=1000,height=800");
+    if (!popup) {
+      setError("Popup blocked. Allow popups, then click Download PDF again.");
+      return;
+    }
+    popup.document.open();
+    popup.document.write(buildPrintableReport(roles, summary));
+    popup.document.close();
+  }
+
+  return (
+    <div style={styles.page}>
+      <header style={styles.topbar}>
+        <button type="button" style={styles.backButton} onClick={() => navigate(-1)}>
+          {"<- Back"}
+        </button>
+        <div>
+          <h1 style={styles.title}>User Statistics Report</h1>
+          <p style={styles.subtitle}>Live account distribution by role and verification status.</p>
+        </div>
+      </header>
+
+      <main style={styles.container}>
+        <section style={styles.toolbar}>
+          <div>
+            <h2 style={styles.toolbarTitle}>Account Summary</h2>
+            <p style={styles.toolbarText}>Use this for panel presentation when showing admin control over staff and patient accounts.</p>
+          </div>
+          <div style={styles.actions}>
+            <button type="button" onClick={loadReport} disabled={loading} style={styles.primaryButton}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+            <button type="button" onClick={downloadPdf} disabled={loading || !summary} style={styles.secondaryButton}>
+              Download PDF
+            </button>
+            <button type="button" onClick={downloadCsv} disabled={loading || !summary} style={styles.secondaryButton}>
+              Export CSV
+            </button>
+          </div>
+        </section>
+
+        {error ? <div style={styles.error}>{error}</div> : null}
+
+        <section style={styles.metricGrid}>
+          <MetricCard label="Total Users" value={totals.total} detail="All system accounts" />
+          <MetricCard label="Verified Users" value={totals.active} detail={`${totals.activeRate} of all users`} accent={C.teal} />
+          <MetricCard label="Deactivated Users" value={totals.deactivated} detail="Blocked or inactive accounts" accent={C.red} />
+          <MetricCard label="New This Month" value={totals.newThisMonth} detail="Recently created users" accent={C.blue} />
+        </section>
+
+        <div style={styles.gridTwo}>
+          <RoleBars rows={roles} />
+
+          <section style={styles.panel}>
+            <h2 style={styles.panelTitle}>Status Notes</h2>
+            <p style={styles.summary}>
+              Verified accounts can log in and use their assigned module. Deactivated accounts are blocked from access. Other statuses include unverified or locked accounts.
+            </p>
+            <p style={styles.recommendation}>
+              Admin should create and manage every staff account separately. Frontdesk, nurse, doctor, cashier, admin, and patient users must remain distinct accounts for audit and accountability.
+            </p>
+          </section>
+        </div>
+
+        <section style={styles.panel}>
+          <h2 style={styles.panelTitle}>Detailed Report View</h2>
+          {loading ? (
+            <div style={styles.empty}>Loading user statistics...</div>
+          ) : (
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Role</th>
+                    <th style={styles.th}>Total</th>
+                    <th style={styles.th}>Verified</th>
+                    <th style={styles.th}>Deactivated</th>
+                    <th style={styles.th}>Other Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roles.map((row) => (
+                    <tr key={row.role_name}>
+                      <td style={styles.td}>{row.role_name}</td>
+                      <td style={styles.td}>{row.total}</td>
+                      <td style={styles.td}>{row.active}</td>
+                      <td style={styles.td}>{row.deactivated}</td>
+                      <td style={styles.td}>{row.other}</td>
+                    </tr>
+                  ))}
+                  {roles.length === 0 ? (
+                    <tr>
+                      <td style={styles.td} colSpan={5}>No role data found.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
 
 const styles = {
-  body: {
-    fontFamily: "Arial, Helvetica, sans-serif",
-    background: "#e5e7eb",
-    color: "#111827",
+  page: {
     minHeight: "100vh",
-    margin: 0,
-    padding: 0,
-    boxSizing: "border-box",
+    background: "#eef3f8",
+    color: C.text,
+    fontFamily: "Arial, Helvetica, sans-serif",
   },
   topbar: {
-    background: "#163b6b",
-    color: "#fff",
-    padding: "18px 22px",
+    background: C.navy,
+    color: "#ffffff",
+    padding: "18px 24px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-    fontWeight: 700,
-    fontSize: "1.9rem",
+    gap: 18,
+    boxShadow: "0 8px 18px rgba(18, 59, 109, 0.18)",
   },
-  backLink: {
-    position: "absolute",
-    left: 20,
-    color: "#fff",
-    textDecoration: "none",
-    fontSize: "1rem",
+  backButton: {
+    border: "1px solid rgba(255,255,255,0.35)",
+    background: "rgba(255,255,255,0.1)",
+    color: "#ffffff",
+    borderRadius: 6,
+    padding: "9px 12px",
     fontWeight: 700,
     cursor: "pointer",
-    background: "none",
-    border: "none",
-    padding: 0,
+  },
+  title: {
+    margin: 0,
+    fontSize: 28,
+    lineHeight: 1.1,
+  },
+  subtitle: {
+    margin: "4px 0 0",
+    color: "#dbeafe",
+    fontSize: 14,
   },
   container: {
-    width: "min(1180px, 94%)",
-    margin: "26px auto 40px",
-  },
-  headerBlock: {
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  h1: {
-    fontSize: "2rem",
-    marginBottom: 8,
-    margin: 0,
-  },
-  headerP: {
-    color: "#334155",
-    fontSize: "1.02rem",
-    margin: 0,
+    width: "min(1180px, 94vw)",
+    margin: "24px auto 42px",
   },
   toolbar: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 12,
-    justifyContent: "center",
-    margin: "20px 0 24px",
-  },
-  button: {
-    border: "none",
-    background: "#163b6b",
-    color: "#fff",
-    padding: "12px 18px",
+    background: C.white,
+    border: `1px solid ${C.line}`,
     borderRadius: 8,
+    padding: 16,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 14,
+    flexWrap: "wrap",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  toolbarTitle: {
+    margin: 0,
+    color: C.text,
+    fontSize: 18,
+  },
+  toolbarText: {
+    margin: "5px 0 0",
+    color: C.muted,
+    fontSize: 13,
+  },
+  actions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  primaryButton: {
+    border: "none",
+    background: C.navy,
+    color: "#ffffff",
+    borderRadius: 6,
+    padding: "11px 14px",
     fontWeight: 700,
     cursor: "pointer",
-    fontSize: "1rem",
   },
-  summaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
-    gap: 16,
-    marginBottom: 20,
-  },
-  summaryCard: {
-    background: "#f8fafc",
-    borderRadius: 14,
-    padding: 18,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
-    borderLeft: "6px solid #163b6b",
-  },
-  summaryCardH3: {
-    fontSize: "0.98rem",
-    color: "#475569",
-    marginBottom: 8,
-    margin: "0 0 8px 0",
-    fontWeight: 600,
-  },
-  summaryCardValue: {
-    fontSize: "1.9rem",
+  secondaryButton: {
+    border: `1px solid ${C.line}`,
+    background: C.white,
+    color: C.navy,
+    borderRadius: 6,
+    padding: "10px 14px",
     fontWeight: 700,
-    color: "#0f172a",
+    cursor: "pointer",
   },
-  chartsGrid: {
+  error: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    border: "1px solid #fecaca",
+    borderRadius: 8,
+    padding: "12px 14px",
+    marginBottom: 16,
+  },
+  metricGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, 1fr)",
-    gap: 18,
-    marginBottom: 20,
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: 14,
+    marginBottom: 16,
   },
-  chartCard: {
-    background: "#f8fafc",
-    borderRadius: 14,
+  metricCard: {
+    background: C.white,
+    border: `1px solid ${C.line}`,
+    borderLeft: `5px solid ${C.navy}`,
+    borderRadius: 8,
+    padding: 16,
+  },
+  metricLabel: {
+    color: C.muted,
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "uppercase",
+  },
+  metricValue: {
+    color: C.text,
+    fontSize: 30,
+    fontWeight: 800,
+    marginTop: 4,
+  },
+  metricDetail: {
+    color: C.muted,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  gridTwo: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: 16,
+  },
+  panel: {
+    background: C.white,
+    border: `1px solid ${C.line}`,
+    borderRadius: 8,
     padding: 18,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+    marginBottom: 16,
   },
-  tableCard: {
-    background: "#f8fafc",
-    borderRadius: 14,
-    padding: 18,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+  panelTitle: {
+    margin: "0 0 12px",
+    color: C.navy,
+    fontSize: 20,
   },
-  cardH2: {
-    fontSize: "1.2rem",
-    marginBottom: 14,
-    color: "#163b6b",
-    margin: "0 0 14px 0",
+  empty: {
+    color: C.muted,
+    padding: "14px 0",
   },
-  chartWrap: {
-    position: "relative",
-    height: 320,
+  barHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 6,
+  },
+  barLabel: {
+    color: C.text,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  barValue: {
+    color: C.muted,
+    fontSize: 13,
+    fontWeight: 800,
+  },
+  barTrack: {
+    height: 10,
+    background: "#e8eef5",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    background: C.navy,
+    borderRadius: 999,
+  },
+  summary: {
+    margin: "0 0 14px",
+    lineHeight: 1.55,
+    color: "#263548",
+  },
+  recommendation: {
+    margin: 0,
+    background: "#eef6ff",
+    borderLeft: `4px solid ${C.navy}`,
+    borderRadius: 6,
+    padding: "12px 14px",
+    color: C.navy,
+    fontWeight: 700,
+    lineHeight: 1.5,
+  },
+  tableWrap: {
+    overflowX: "auto",
   },
   table: {
     width: "100%",
     borderCollapse: "collapse",
   },
   th: {
-    padding: 12,
-    borderBottom: "1px solid #dbe3ea",
+    background: "#eef4fb",
+    color: C.navy,
     textAlign: "left",
-    fontSize: "0.96rem",
-    background: "#edf2f7",
-    color: "#163b6b",
+    padding: 10,
+    borderBottom: `1px solid ${C.line}`,
+    fontSize: 13,
   },
   td: {
-    padding: 12,
-    borderBottom: "1px solid #dbe3ea",
-    textAlign: "left",
-    fontSize: "0.96rem",
-  },
-  footerNote: {
-    textAlign: "center",
-    color: "#64748b",
-    marginTop: 14,
-    fontSize: "0.95rem",
+    padding: 10,
+    borderBottom: "1px solid #edf2f7",
+    color: "#263548",
+    fontSize: 14,
   },
 };
-
-const summaryData = [
-  { label: "Total Members", value: "1,248" },
-  { label: "Dependents", value: "842" },
-  { label: "Hospital Staff", value: "214" },
-  { label: "New This Month", value: "96" },
-];
-
-const tableRows = [
-  { category: "Members", total: 1248, active: 1180, inactive: 68 },
-  { category: "Dependents", total: 842, active: 801, inactive: 41 },
-  { category: "Staff", total: 214, active: 210, inactive: 4 },
-  { category: "New Registrations", total: 96, active: 96, inactive: 0 },
-];
-
-export default function UserStatisticsReport() {
-  const chartOneRef = useRef(null);
-  const chartTwoRef = useRef(null);
-  const chartOneInstance = useRef(null);
-  const chartTwoInstance = useRef(null);
-
-  useEffect(() => {
-    if (chartOneRef.current) {
-      if (chartOneInstance.current) chartOneInstance.current.destroy();
-      chartOneInstance.current = new Chart(chartOneRef.current, {
-        type: "line",
-        data: {
-          labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-          datasets: [
-            {
-              label: "Registered Users",
-              data: [120, 160, 190, 230, 260, 288],
-              borderWidth: 3,
-              fill: false,
-              borderColor: "#163b6b",
-              backgroundColor: "#163b6b",
-            },
-          ],
-        },
-        options: { responsive: true, maintainAspectRatio: false },
-      });
-    }
-    if (chartTwoRef.current) {
-      if (chartTwoInstance.current) chartTwoInstance.current.destroy();
-      chartTwoInstance.current = new Chart(chartTwoRef.current, {
-        type: "bar",
-        data: {
-          labels: ["Members", "Dependents", "Staff"],
-          datasets: [
-            {
-              label: "Total Count",
-              data: [1248, 842, 214],
-              borderWidth: 1,
-              backgroundColor: "#163b6b",
-            },
-          ],
-        },
-        options: { responsive: true, maintainAspectRatio: false },
-      });
-    }
-    return () => {
-      chartOneInstance.current?.destroy();
-      chartTwoInstance.current?.destroy();
-    };
-  }, []);
-
-  const exportTableCSV = () => {
-    const headers = ["Category", "Total", "Active", "Inactive"];
-    const rows = tableRows.map((r) =>
-      [r.category, r.total, r.active, r.inactive]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-        .join(",")
-    );
-    const csv = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "user-statistics-report.csv";
-    link.click();
-  };
-
-  const downloadCanvas = (canvasRef, filename) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement("a");
-    link.download = filename;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-  };
-
-  const downloadCharts = () => {
-    downloadCanvas(chartOneRef, "user-statistics-chart-1.png");
-    setTimeout(() => downloadCanvas(chartTwoRef, "user-statistics-chart-2.png"), 300);
-  };
-
-  return (
-    <div style={styles.body}>
-      {/* Topbar */}
-      <div style={styles.topbar}>
-        <button style={styles.backLink} onClick={() => window.history.back()}>
-          &larr; Back
-        </button>
-        Analytics Reports
-      </div>
-
-      {/* Main Container */}
-      <div style={styles.container}>
-        {/* Header */}
-        <div style={styles.headerBlock}>
-          <h1 style={styles.h1}>User Statistics Report</h1>
-          <p style={styles.headerP}>Overview of registered members, dependents, and staff.</p>
-        </div>
-
-        {/* Toolbar */}
-        <div style={styles.toolbar}>
-          <button style={styles.button} onClick={() => window.print()}>
-            Print / Export PDF
-          </button>
-          <button style={styles.button} onClick={exportTableCSV}>
-            Export Table CSV
-          </button>
-          <button style={styles.button} onClick={downloadCharts}>
-            Download Charts
-          </button>
-        </div>
-
-        {/* Summary Cards */}
-        <div style={styles.summaryGrid}>
-          {summaryData.map((card) => (
-            <div key={card.label} style={styles.summaryCard}>
-              <h3 style={styles.summaryCardH3}>{card.label}</h3>
-              <div style={styles.summaryCardValue}>{card.value}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Charts */}
-        <div style={styles.chartsGrid}>
-          <div style={styles.chartCard}>
-            <h2 style={styles.cardH2}>User Registration Trend</h2>
-            <div style={styles.chartWrap}>
-              <canvas ref={chartOneRef} />
-            </div>
-          </div>
-          <div style={styles.chartCard}>
-            <h2 style={styles.cardH2}>User Category Distribution</h2>
-            <div style={styles.chartWrap}>
-              <canvas ref={chartTwoRef} />
-            </div>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div style={styles.tableCard}>
-          <h2 style={styles.cardH2}>Detailed Report View</h2>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Category</th>
-                <th style={styles.th}>Total</th>
-                <th style={styles.th}>Active</th>
-                <th style={styles.th}>Inactive</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.map((row) => (
-                <tr key={row.category}>
-                  <td style={styles.td}>{row.category}</td>
-                  <td style={styles.td}>{row.total}</td>
-                  <td style={styles.td}>{row.active}</td>
-                  <td style={styles.td}>{row.inactive}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <div style={styles.footerNote}>
-          This is a viewable and exportable sample analytics report page for a hospital management system.
-        </div>
-      </div>
-
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          button { display: none !important; }
-          body { background: #fff !important; }
-        }
-        @media (max-width: 900px) {
-          .summary-grid, .charts-grid { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
-    </div>
-  );
-}

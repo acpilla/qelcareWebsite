@@ -27,6 +27,11 @@ const STATUS_META = {
     color: COLORS.blue,
     bg: COLORS.blueSoft,
   },
+  CALLED: {
+    label: "Called",
+    color: COLORS.amber,
+    bg: COLORS.amberSoft,
+  },
   IN_PROGRESS: {
     label: "In Progress",
     color: COLORS.amber,
@@ -42,12 +47,28 @@ const STATUS_META = {
     color: COLORS.green,
     bg: COLORS.greenSoft,
   },
+  NO_SHOW: {
+    label: "No Show",
+    color: COLORS.red,
+    bg: COLORS.redSoft,
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    color: COLORS.red,
+    bg: COLORS.redSoft,
+  },
 };
 
 function todayISO() {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function formatDate(value) {
@@ -267,9 +288,11 @@ export default function AdminQueue() {
   const stats = useMemo(() => {
     return {
       waiting: queue.filter((q) => q.status === "WAITING").length,
+      called: queue.filter((q) => q.status === "CALLED").length,
       inProgress: queue.filter((q) => q.status === "IN_PROGRESS").length,
       skipped: queue.filter((q) => q.status === "SKIPPED").length,
       done: queue.filter((q) => q.status === "DONE").length,
+      noShow: queue.filter((q) => q.status === "NO_SHOW").length,
     };
   }, [queue]);
 
@@ -519,7 +542,7 @@ export default function AdminQueue() {
             }}
           >
             <Icon type="check" size={14} color="currentColor" />
-            Queue is created by Cashier payment
+            Queue is created after same-day approval
           </div>
           <ActionButton
             label="Refresh"
@@ -606,9 +629,11 @@ export default function AdminQueue() {
         }}
       >
         <MetricCard label="Waiting" value={stats.waiting} color={COLORS.blue} />
+        <MetricCard label="Called" value={stats.called} color={COLORS.amber} />
         <MetricCard label="In Progress" value={stats.inProgress} color={COLORS.amber} />
         <MetricCard label="Skipped" value={stats.skipped} color={COLORS.gray} />
         <MetricCard label="Done" value={stats.done} color={COLORS.green} />
+        <MetricCard label="No Show" value={stats.noShow} color={COLORS.red} />
       </div>
 
       <div
@@ -757,7 +782,7 @@ export default function AdminQueue() {
         ) : queue.length === 0 ? (
           <EmptyState
             title="No queue entries"
-            body="Queue entries appear here only after Cashier payment creates them."
+            body="Queue entries appear here after Frontdesk/Admin approves same-day appointments."
           />
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -864,6 +889,25 @@ export default function AdminQueue() {
                                 icon="play"
                                 tone="amber"
                                 disabled={disabled}
+                                onClick={() => updateQueueStatus(entry.queue_id, "CALLED")}
+                              />
+                              <ActionButton
+                                label="Skip"
+                                icon="skip"
+                                tone="gray"
+                                disabled={disabled}
+                                onClick={() => updateQueueStatus(entry.queue_id, "SKIPPED")}
+                              />
+                            </>
+                          )}
+
+                          {entry.status === "CALLED" && (
+                            <>
+                              <ActionButton
+                                label="Start"
+                                icon="play"
+                                tone="amber"
+                                disabled={disabled}
                                 onClick={() => updateQueueStatus(entry.queue_id, "IN_PROGRESS")}
                               />
                               <ActionButton
@@ -872,6 +916,13 @@ export default function AdminQueue() {
                                 tone="gray"
                                 disabled={disabled}
                                 onClick={() => updateQueueStatus(entry.queue_id, "SKIPPED")}
+                              />
+                              <ActionButton
+                                label="No Show"
+                                icon="skip"
+                                tone="gray"
+                                disabled={disabled}
+                                onClick={() => updateQueueStatus(entry.queue_id, "NO_SHOW")}
                               />
                             </>
                           )}
@@ -886,11 +937,11 @@ export default function AdminQueue() {
                                 onClick={() => updateQueueStatus(entry.queue_id, "DONE")}
                               />
                               <ActionButton
-                                label="Skip"
+                                label="No Show"
                                 icon="skip"
                                 tone="gray"
                                 disabled={disabled}
-                                onClick={() => updateQueueStatus(entry.queue_id, "SKIPPED")}
+                                onClick={() => updateQueueStatus(entry.queue_id, "NO_SHOW")}
                               />
                             </>
                           )}
@@ -905,11 +956,11 @@ export default function AdminQueue() {
                                 onClick={() => updateQueueStatus(entry.queue_id, "WAITING")}
                               />
                               <ActionButton
-                                label="Call"
-                                icon="play"
-                                tone="amber"
+                                label="No Show"
+                                icon="skip"
+                                tone="gray"
                                 disabled={disabled}
-                                onClick={() => updateQueueStatus(entry.queue_id, "IN_PROGRESS")}
+                                onClick={() => updateQueueStatus(entry.queue_id, "NO_SHOW")}
                               />
                             </>
                           )}
@@ -917,6 +968,18 @@ export default function AdminQueue() {
                           {entry.status === "DONE" && (
                             <span style={{ color: COLORS.green, fontSize: 12, fontWeight: 900 }}>
                               Completed
+                            </span>
+                          )}
+
+                          {entry.status === "NO_SHOW" && (
+                            <span style={{ color: COLORS.red, fontSize: 12, fontWeight: 900 }}>
+                              Marked no show
+                            </span>
+                          )}
+
+                          {entry.status === "CANCELLED" && (
+                            <span style={{ color: COLORS.red, fontSize: 12, fontWeight: 900 }}>
+                              Cancelled
                             </span>
                           )}
                         </div>

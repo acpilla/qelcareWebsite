@@ -15,24 +15,82 @@ import {
   todayISO,
 } from "../Workflow/ClinicUi";
 
-const STAFF_ROLES = ["Admin", "Frontdesk", "Nurse", "Doctor"];
+const APPOINTMENT_MANAGER_ROLES = ["Admin", "Frontdesk"];
 const STATUS_FILTERS = ["ALL", "PENDING", "CONFIRMED", "IN_QUEUE", "COMPLETED", "CANCELLED", "RESCHEDULED", "NO_SHOW"];
-const PATIENT_VIEWS = [
-  { value: "ACTIVE", label: "Active" },
-  { value: "HISTORY", label: "History" },
-  { value: "ALL", label: "All" },
-];
-const ACTIVE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "RESCHEDULED"];
-const HISTORY_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
+const ACTIVE_STATUSES = ["IN_QUEUE", "CONFIRMED", "PENDING", "RESCHEDULED"];
+const STATUS_ORDER = {
+  IN_QUEUE: 0,
+  CONFIRMED: 1,
+  PENDING: 2,
+  RESCHEDULED: 3,
+  COMPLETED: 4,
+  CANCELLED: 5,
+  NO_SHOW: 6,
+};
+
+function scheduleValue(item) {
+  const date = String(item.date || "").slice(0, 10);
+  const time = String(item.time || "00:00").slice(0, 5);
+  const value = new Date(`${date}T${time}:00`).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compareAppointments(a, b) {
+  const aActive = ACTIVE_STATUSES.includes(a.status);
+  const bActive = ACTIVE_STATUSES.includes(b.status);
+  if (aActive !== bActive) return aActive ? -1 : 1;
+
+  const statusDiff = (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+  if (statusDiff !== 0) return statusDiff;
+
+  const aSchedule = scheduleValue(a);
+  const bSchedule = scheduleValue(b);
+  if (aActive && bActive && aSchedule !== bSchedule) return aSchedule - bSchedule;
+  if (!aActive && !bActive && aSchedule !== bSchedule) return bSchedule - aSchedule;
+
+  return Number(b.id || 0) - Number(a.id || 0);
+}
+
+function appointmentDate(item) {
+  return String(item.date || "").slice(0, 10);
+}
+
+function isTodayOrPast(item) {
+  const date = appointmentDate(item);
+  return Boolean(date && date <= todayISO());
+}
+
+function workflowHelp(status, isPatient) {
+  const patientCopy = {
+    PENDING: "Waiting for clinic confirmation.",
+    CONFIRMED: "Confirmed. Please arrive on time for queue processing.",
+    IN_QUEUE: "You are in the live clinic queue.",
+    COMPLETED: "Consultation completed. Records and prescriptions appear after doctor entry.",
+    CANCELLED: "This appointment was cancelled.",
+    RESCHEDULED: "Schedule was changed and is awaiting clinic confirmation.",
+    NO_SHOW: "Marked as no-show by the clinic.",
+  };
+
+  const staffCopy = {
+    PENDING: "Confirm, reschedule, or cancel.",
+    CONFIRMED: "Approved. Same-day visits enter queue automatically.",
+    IN_QUEUE: "Nurse and doctor workflow is active.",
+    COMPLETED: "Ready for cashier billing if unpaid.",
+    CANCELLED: "Cancelled appointment history.",
+    RESCHEDULED: "Confirm the new schedule or cancel.",
+    NO_SHOW: "No-show history.",
+  };
+
+  return (isPatient ? patientCopy : staffCopy)[status] || "No workflow note.";
+}
 
 export default function AppointmentList() {
   const role = getUserRole();
   const isPatient = role === "Patient";
-  const canManage = STAFF_ROLES.includes(role);
+  const canManage = APPOINTMENT_MANAGER_ROLES.includes(role);
 
   const [appointments, setAppointments] = useState([]);
   const [status, setStatus] = useState("ALL");
-  const [patientView, setPatientView] = useState("ACTIVE");
   const [search, setSearch] = useState("");
   const [date, setDate] = useState("");
   const [loading, setLoading] = useState(true);
@@ -61,24 +119,10 @@ export default function AppointmentList() {
     load();
   }, [load]);
 
-  const patientCounts = useMemo(() => {
-    return {
-      active: appointments.filter((item) => ACTIVE_STATUSES.includes(item.status)).length,
-      history: appointments.filter((item) => HISTORY_STATUSES.includes(item.status)).length,
-      all: appointments.length,
-    };
-  }, [appointments]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-
     return appointments
-      .filter((item) => {
-        if (!isPatient) return status === "ALL" || item.status === status;
-        if (patientView === "ACTIVE") return ACTIVE_STATUSES.includes(item.status);
-        if (patientView === "HISTORY") return HISTORY_STATUSES.includes(item.status);
-        return true;
-      })
+      .filter((item) => status === "ALL" || item.status === status)
       .filter((item) => !date || String(item.date || "").slice(0, 10) === date)
       .filter((item) => {
         if (!q) return true;
@@ -90,8 +134,8 @@ export default function AppointmentList() {
           String(item.id || ""),
         ].some((value) => String(value || "").toLowerCase().includes(q));
       })
-      .sort((a, b) => `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`));
-  }, [appointments, date, isPatient, patientView, search, status]);
+      .sort(compareAppointments);
+  }, [appointments, date, search, status]);
 
   async function changeStatus(appointment, nextStatus) {
     let cancelReason = "";
@@ -110,7 +154,7 @@ export default function AppointmentList() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "Failed to update appointment.");
-      setMessage(`Appointment #${appointment.id} changed to ${nextStatus}.`);
+      setMessage(payload.message || `Appointment #${appointment.id} changed to ${nextStatus}.`);
       await load();
     } catch (err) {
       setError(err.message);
@@ -145,72 +189,35 @@ export default function AppointmentList() {
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <Panel style={{ padding: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: isPatient ? "2fr 170px 150px auto" : "2fr 150px 150px auto", gap: 10, alignItems: "end" }}>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ color: "#42526a", fontSize: 13, lineHeight: 1.45 }}>
+            {isPatient
+              ? "Bookings are clinic-controlled after submission. Frontdesk confirms schedules, same-day confirmed visits enter the queue, nurses record vitals, doctors complete records, and cashier handles billing after consultation."
+              : "Appointment control belongs to Admin and Frontdesk. Nurses work from the live queue, doctors work from assigned consultations, and cashier bills completed visits."}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 150px 150px auto", gap: 10, alignItems: "end" }}>
           <Field label="Search">
-            <input style={inputStyle} value={search} onChange={(e) => setSearch(e.target.value)} placeholder={isPatient ? "Doctor, specialty, appointment #" : "Patient, doctor, specialty, appointment #"} />
+            <input style={inputStyle} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Patient, doctor, specialty, appointment #" />
           </Field>
-
-          {isPatient ? (
-            <Field label="View">
-              <select style={inputStyle} value={patientView} onChange={(e) => setPatientView(e.target.value)}>
-                {PATIENT_VIEWS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </Field>
-          ) : (
-            <Field label="Status">
-              <select style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
-                {STATUS_FILTERS.map((item) => (
-                  <option key={item} value={item}>{item === "ALL" ? "All statuses" : item.replace("_", " ")}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-
+          <Field label="Status">
+            <select style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
+              {STATUS_FILTERS.map((item) => (
+                <option key={item} value={item}>{item === "ALL" ? "All statuses" : item.replace("_", " ")}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Date">
             <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
           <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+          </div>
         </div>
       </Panel>
-
-      {isPatient && (
-        <Panel style={{ padding: 12 }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {PATIENT_VIEWS.map((item) => {
-              const active = patientView === item.value;
-              const count = item.value === "ACTIVE" ? patientCounts.active : item.value === "HISTORY" ? patientCounts.history : patientCounts.all;
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  onClick={() => setPatientView(item.value)}
-                  style={{
-                    minHeight: 36,
-                    padding: "0 13px",
-                    borderRadius: 8,
-                    border: `1px solid ${active ? "#163a6b" : "#cddbeb"}`,
-                    background: active ? "#163a6b" : "#fff",
-                    color: active ? "#fff" : "#163a6b",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 900,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {item.label} ({count})
-                </button>
-              );
-            })}
-          </div>
-        </Panel>
-      )}
 
       <ErrorState message={error} />
       {message && <div style={{ padding: "10px 12px", borderRadius: 8, background: "#edf8f1", color: "#0f6b3c", fontSize: 13, fontWeight: 800 }}>{message}</div>}
 
-      {reschedule && !isPatient && (
+      {reschedule && (
         <Panel style={{ padding: 16 }}>
           <form onSubmit={submitReschedule} style={{ display: "grid", gridTemplateColumns: "1fr 160px 140px auto auto", gap: 10, alignItems: "end" }}>
             <div>
@@ -223,7 +230,7 @@ export default function AppointmentList() {
             <Field label="New time">
               <input style={inputStyle} type="time" value={reschedule.time} onChange={(e) => setReschedule({ ...reschedule, time: e.target.value })} />
             </Field>
-            <ActionButton type="submit" disabled={savingId === reschedule.id}>Save</ActionButton>
+            <ActionButton disabled={savingId === reschedule.id}>Save</ActionButton>
             <ActionButton tone="secondary" onClick={() => setReschedule(null)}>Cancel</ActionButton>
           </form>
         </Panel>
@@ -234,7 +241,7 @@ export default function AppointmentList() {
           <div>
             <div style={{ fontSize: 15, fontWeight: 900, color: "#162235" }}>{isPatient ? "My Appointments" : "Appointments"}</div>
             <div style={{ fontSize: 12, color: "#6b778c", marginTop: 2 }}>
-              {filtered.length} record(s){isPatient && patientView === "ACTIVE" ? " - pending, confirmed, queued, or rescheduled" : ""}
+              {filtered.length} record(s) - active appointments first, then completed/cancelled history
             </div>
           </div>
         </div>
@@ -242,16 +249,13 @@ export default function AppointmentList() {
         {loading ? (
           <LoadingState label="Loading appointments..." />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            title="No appointments found"
-            detail={isPatient && patientView === "ACTIVE" ? "Booked appointments appear here while the clinic processes them." : "Adjust filters or refresh the list."}
-          />
+          <EmptyState title="No appointments found" detail="Adjust filters or refresh the list." />
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f7fafd", color: "#65758b" }}>
-                  {(isPatient ? ["ID", "Doctor", "Specialty", "Schedule", "Status", "Concern"] : ["ID", "Patient", "Doctor", "Specialty", "Schedule", "Status", "Actions"]).map((heading) => (
+                  {["ID", "Patient", "Doctor", "Specialty", "Schedule", "Status", isPatient ? "Next Step" : "Workflow"].map((heading) => (
                     <th key={heading} style={{ textAlign: "left", padding: "11px 14px", fontSize: 11, textTransform: "uppercase" }}>{heading}</th>
                   ))}
                 </tr>
@@ -260,40 +264,32 @@ export default function AppointmentList() {
                 {filtered.map((item) => (
                   <tr key={item.id} style={{ borderTop: "1px solid #eef3f9" }}>
                     <td style={{ padding: "12px 14px", color: "#6b778c", fontWeight: 800 }}>#{item.id}</td>
-
-                    {!isPatient && (
-                      <td style={{ padding: "12px 14px" }}>
-                        <div style={{ fontWeight: 900, color: "#162235" }}>{item.patient_name || "-"}</div>
-                        <div style={{ fontSize: 12, color: "#6b778c" }}>{item.patient_phone || item.patient_email || ""}</div>
-                      </td>
-                    )}
-
+                    <td style={{ padding: "12px 14px" }}>
+                      <div style={{ fontWeight: 900, color: "#162235" }}>{item.patient_name || "-"}</div>
+                      <div style={{ fontSize: 12, color: "#6b778c" }}>{item.patient_phone || item.patient_email || ""}</div>
+                    </td>
                     <td style={{ padding: "12px 14px", fontWeight: 700 }}>{item.doctor_name || "-"}</td>
                     <td style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
                     <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>{formatDate(item.date)} at {formatTime(item.time)}</td>
                     <td style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
-
-                    {isPatient ? (
-                      <td style={{ padding: "12px 14px", color: "#42526a", maxWidth: 260 }}>
-                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {item.chief_complaint || item.notes || "Clinic controlled"}
-                        </div>
-                      </td>
-                    ) : (
-                      <td style={{ padding: "12px 14px" }}>
-                        {canManage ? (
+                    <td style={{ padding: "12px 14px" }}>
+                      {canManage ? (
+                        <div style={{ display: "grid", gap: 7 }}>
+                          <div style={{ color: "#6b778c", fontSize: 12 }}>{workflowHelp(item.status, false)}</div>
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                             {item.status === "PENDING" && <ActionButton disabled={savingId === item.id} tone="success" onClick={() => changeStatus(item, "CONFIRMED")}>Confirm</ActionButton>}
                             {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(item.status) && <ActionButton disabled={savingId === item.id} tone="secondary" onClick={() => setReschedule({ id: item.id, patient_name: item.patient_name, date: item.date || todayISO(), time: item.time || "" })}>Reschedule</ActionButton>}
                             {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(item.status) && <ActionButton disabled={savingId === item.id} tone="danger" onClick={() => changeStatus(item, "CANCELLED")}>Cancel</ActionButton>}
-                            {["CONFIRMED", "IN_QUEUE"].includes(item.status) && <ActionButton disabled={savingId === item.id} tone="warning" onClick={() => changeStatus(item, "NO_SHOW")}>No Show</ActionButton>}
+                            {["CONFIRMED", "IN_QUEUE"].includes(item.status) && isTodayOrPast(item) && <ActionButton disabled={savingId === item.id} tone="warning" onClick={() => changeStatus(item, "NO_SHOW")}>No Show</ActionButton>}
                             {!["PENDING", "CONFIRMED", "RESCHEDULED", "IN_QUEUE"].includes(item.status) && <span style={{ color: "#6b778c" }}>No action</span>}
                           </div>
-                        ) : (
-                          <span style={{ color: "#6b778c" }}>Clinic controlled</span>
-                        )}
-                      </td>
-                    )}
+                        </div>
+                      ) : isPatient ? (
+                        <span style={{ color: "#42526a", fontSize: 12, lineHeight: 1.45 }}>{workflowHelp(item.status, true)}</span>
+                      ) : (
+                        <span style={{ color: "#42526a", fontSize: 12, lineHeight: 1.45 }}>{workflowHelp(item.status, false)}</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
