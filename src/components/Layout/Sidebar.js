@@ -15,11 +15,10 @@ const Icons = {
   logout: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>,
   clinic: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>,
   nurseQueue: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>,
-  vitals: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" /></svg>,
-  myAppt: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="8" y1="14" x2="10" y2="14" /></svg>,
   myRecords: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
   medicalResults: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M8 13h8" /><path d="M8 17h5" /><path d="M8 9h2" /></svg>,
   billing: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" /></svg>,
+  inquiries: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>,
 };
 
 const NAV_BY_ROLE = {
@@ -28,6 +27,7 @@ const NAV_BY_ROLE = {
     { id: "users", label: "Manage Users", icon: Icons.users, path: "/admin/users" },
     { id: "patients", label: "Patient Management", icon: Icons.patients, path: "/admin/patients" },
     { id: "appointments", label: "Appointments", icon: Icons.appointments, path: "/admin/appointments" },
+    { id: "inquiries", label: "Inquiries", icon: Icons.inquiries, path: "/admin/inquiries" },
     { id: "queue", label: "Queue Management", icon: Icons.queue, path: "/admin/queue" },
     { id: "records", label: "Medical Records", icon: Icons.records, path: "/admin/records" },
     { id: "billing", label: "Billing", icon: Icons.billing, path: "/admin/billing" },
@@ -38,6 +38,7 @@ const NAV_BY_ROLE = {
   Doctor: [
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard, path: "/doctor/dashboard" },
     { id: "appointments", label: "Appointments", icon: Icons.appointments, path: "/doctor/appointments" },
+    { id: "medapprovals", label: "Medication Review", icon: Icons.medicalResults, path: "/doctor/medication-approvals" },
     { id: "records", label: "Medical Records", icon: Icons.records, path: "/doctor/records" },
     { id: "profile", label: "Profile Settings", icon: Icons.profile, path: "/doctor/profile" },
   ],
@@ -45,11 +46,12 @@ const NAV_BY_ROLE = {
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard, path: "/frontdesk/dashboard" },
     { id: "patients", label: "Patients", icon: Icons.patients, path: "/frontdesk/patients" },
     { id: "appointments", label: "Appointments", icon: Icons.appointments, path: "/frontdesk/appointments" },
+    { id: "inquiries", label: "Inquiries", icon: Icons.inquiries, path: "/frontdesk/inquiries" },
     { id: "queue", label: "Queue Display", icon: Icons.queue, path: "/lobby/live-queue-display" },
     { id: "profile", label: "Profile Settings", icon: Icons.profile, path: "/frontdesk/profile" },
   ],
   Nurse: [
-    { id: "queue", label: "Nurse Queue", icon: Icons.nurseQueue, path: "/nurse/queue" },
+    { id: "station", label: "Nurse Station", icon: Icons.nurseQueue, path: "/nurse-station" },
     { id: "appointments", label: "Appointments", icon: Icons.appointments, path: "/nurse/appointments" },
     { id: "profile", label: "Profile Settings", icon: Icons.profile, path: "/nurse/profile" },
   ],
@@ -60,11 +62,9 @@ const NAV_BY_ROLE = {
   ],
   Patient: [
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard, path: "/dashboard" },
-    { id: "myAppt", label: "My Appointments", icon: Icons.myAppt, path: "/patient/appointments" },
-    { id: "bookAppt", label: "Book Appointment", icon: Icons.appointments, path: "/patient/appointments/book" },
-    { id: "myRecords", label: "My Records", icon: Icons.myRecords, path: "/patient/records" },
-    { id: "medicalResults", label: "Medical Results", icon: Icons.medicalResults, path: "/patient/results" },
-    { id: "medications", label: "Medications", icon: Icons.records, path: "/patient/medications" },
+    { id: "appointments", label: "Appointments", icon: Icons.appointments, path: "/patient/appointments" },
+    { id: "myRecords", label: "Consultation Records", icon: Icons.myRecords, path: "/patient/records" },
+    { id: "health", label: "Medications & Documents", icon: Icons.medicalResults, path: "/patient/health" },
     { id: "profile", label: "Profile Settings", icon: Icons.profile, path: "/patient/profile" },
   ],
 };
@@ -84,7 +84,10 @@ export default function Sidebar({ open = true }) {
   const role = getUserRole() || "Admin";
   const navItems = NAV_BY_ROLE[role] || NAV_BY_ROLE.Admin;
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path === "/patient/appointments") return location.pathname.startsWith("/patient/appointments");
+    return location.pathname === path;
+  };
 
   return (
     <aside style={{

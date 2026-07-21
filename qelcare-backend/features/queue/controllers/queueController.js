@@ -1,4 +1,5 @@
 const Queue = require("../models/Queue");
+const Vital = require("../../vitals/models/Vital");
 const logger = require("../../../shared/utils/activityLogger");
 
 function todayISO() {
@@ -144,6 +145,19 @@ const queueController = {
 
       const existingEntry = await assertQueueOwnership(req, req.params.queueId, nextStatus);
       if (!existingEntry) return res.status(404).json({ success: false, message: "Queue entry not found." });
+
+      // Vitals are mandatory: a patient's visit cannot be completed (marked DONE)
+      // until the nurse has recorded their vitals for this appointment.
+      if (nextStatus === "DONE" && existingEntry.appointment_id) {
+        const vitals = await Vital.findByAppointment(existingEntry.appointment_id);
+        if (!vitals || vitals.length === 0) {
+          return res.status(400).json({
+            success: false,
+            code: "VITALS_REQUIRED",
+            message: "Vitals must be recorded for this patient before the visit can be completed.",
+          });
+        }
+      }
 
       const entry = await Queue.updateStatus(req.params.queueId, nextStatus, notes);
       if (!entry) return res.status(404).json({ success: false, message: "Queue entry not found." });

@@ -1,19 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
+import { C } from "../../../utils/adminTheme";
 
-const C = {
-  navy: "#0f2744",
-  blue: "#163a6b",
-  teal: "#1f7a6f",
-  amber: "#9a6500",
-  purple: "#5a3a8a",
-  red: "#b63342",
-  muted: "#8a97a8",
-  text: "#516174",
-  border: "#e4ecf5",
-  soft: "#f8fafd",
-};
+const EXPORT_COLUMNS = [
+  { header: "Record", value: (record) => `MR-${String(recordId(record)).padStart(5, "0")}` },
+  { header: "Patient", value: (record) => record.patient_name || "" },
+  { header: "Phone", value: (record) => record.patient_phone || "" },
+  { header: "Doctor", value: (record) => record.doctor_name || "" },
+  { header: "Visit Date", value: (record) => formatDate(record.visit_date) },
+  { header: "Specialty", value: (record) => record.specialty_name || "" },
+  { header: "Diagnosis", value: (record) => record.diagnosis || "" },
+  { header: "Chief Complaint", value: (record) => record.chief_complaint || "" },
+  { header: "Vitals", value: (record) => (record.vital_id ? `Vitals #${record.vital_id}` : "Not linked") },
+  { header: "Follow-up", value: (record) => { const f = record.follow_up_date_text || record.follow_up_date; return f ? formatDate(f) : ""; } },
+  { header: "Confidential", value: (record) => (record.is_confidential ? "Yes" : "No") },
+];
 
 const inputStyle = {
   height: 40,
@@ -523,6 +526,15 @@ export default function AdminRecords() {
           <div style={{ color: C.text, fontSize: 13 }}>Review doctor-authored records. Clinical edits are restricted to doctors.</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          <ExportMenu
+            filename="qelcare-medical-records"
+            title="QELCare Medical Records"
+            subtitle={`${visibleRecords.length} record${visibleRecords.length === 1 ? "" : "s"} matching the current filters`}
+            sheetTitle="Medical Records"
+            columns={EXPORT_COLUMNS}
+            rows={visibleRecords}
+            disabled={loading}
+          />
           <Button onClick={loadRecords} disabled={loading}>Refresh</Button>
         </div>
       </div>

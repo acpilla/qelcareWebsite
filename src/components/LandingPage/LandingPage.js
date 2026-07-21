@@ -937,7 +937,7 @@ const stats = [
   },
   {
     label: "Hours",
-    value: "9:00 AM-6:00 PM",
+    value: "8:00 AM-8:00 PM",
     sub: "Monday to Saturday",
   },
   {
@@ -955,7 +955,7 @@ const infoCards = [
   },
   {
     kicker: "Sunday Hours",
-    main: "10:00 AM-6:00 PM",
+    main: "8:00 AM-8:00 PM",
     desc: "Weekend clinic hours for patient visits and consultations.",
   },
   {
@@ -1093,8 +1093,8 @@ const visitCards = [
     title: "Operating Hours",
     body: "The clinic provides regular weekday and weekend hours for patient visits.",
     items: [
-      "Monday to Saturday: 9:00 AM to 6:00 PM",
-      "Sunday: 10:00 AM to 6:00 PM",
+      "Monday to Saturday: 8:00 AM to 8:00 PM",
+      "Sunday: 8:00 AM to 8:00 PM",
       "Patients are encouraged to confirm schedules before visiting",
     ],
   },
@@ -1270,7 +1270,7 @@ function Hero() {
                 </div>
                 <div>
                   <strong>Public Hours</strong>
-                  <span>Monday to Saturday: 9:00 AM-6:00 PM<br />Sunday: 10:00 AM-6:00 PM</span>
+                  <span>Monday to Saturday: 8:00 AM-8:00 PM<br />Sunday: 8:00 AM-8:00 PM</span>
                 </div>
               </div>
 

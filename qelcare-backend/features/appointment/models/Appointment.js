@@ -1,9 +1,11 @@
 const db = require("../../../config/database");
 
-const VALID_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "COMPLETED", "CANCELLED", "RESCHEDULED", "NO_SHOW"];
+const VALID_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "COMPLETED", "CANCELLED", "RESCHEDULED", "NO_SHOW"];
 const VALID_TYPES = ["consultation", "follow_up", "walk_in", "emergency"];
-
-const ACTIVE_CONFLICT_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "COMPLETED"];
+const VALID_BOOKED_FOR = ["self", "other"];
+const ACTIVE_CONFLICT_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "COMPLETED"];
+const ACTIVE_VISIBLE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "RESCHEDULED"];
+const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
 
 function normalizeStatus(status) {
   return String(status || "").trim().toUpperCase();
@@ -12,6 +14,72 @@ function normalizeStatus(status) {
 function normalizeType(type) {
   const value = String(type || "consultation").trim().toLowerCase();
   return VALID_TYPES.includes(value) ? value : "consultation";
+}
+
+function normalizeBookedFor(value) {
+  const normalized = String(value || "self").trim().toLowerCase();
+  return VALID_BOOKED_FOR.includes(normalized) ? normalized : "self";
+}
+
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function manilaNowMinuteKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function appointmentMinuteKey(date, time) {
+  const dateText = String(date || "").slice(0, 10);
+  const timeText = normalizeTime(time);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^\d{2}:\d{2}$/.test(timeText)) return "";
+  return `${dateText}T${timeText}`;
+}
+
+function isPastManila(date, time) {
+  const key = appointmentMinuteKey(date, time);
+  if (!key) return false;
+  return key <= manilaNowMinuteKey();
+}
+
+function assertNotPastManila(date, time, label = "Appointment schedule") {
+  if (!appointmentMinuteKey(date, time)) {
+    throw { statusCode: 400, message: "Valid date and time are required." };
+  }
+  if (isPastManila(date, time)) {
+    throw { statusCode: 400, message: `${label} must be in the future using Asia/Manila time.` };
+  }
+}
+
+// Clinic operating hours: 8:00 AM to 8:00 PM (Asia/Manila). Patient bookings and
+// patient edits must fall inside this window.
+const CLINIC_OPEN_MINUTES = 8 * 60;   // 08:00
+const CLINIC_CLOSE_MINUTES = 20 * 60; // 20:00
+
+function assertWithinClinicHours(time) {
+  const t = normalizeTime(time);
+  if (!/^\d{2}:\d{2}$/.test(t)) {
+    throw { statusCode: 400, message: "Valid time is required." };
+  }
+  const [hour, minute] = t.split(":").map(Number);
+  const total = hour * 60 + minute;
+  if (total < CLINIC_OPEN_MINUTES || total > CLINIC_CLOSE_MINUTES) {
+    throw { statusCode: 400, message: "Clinic hours are 8:00 AM to 8:00 PM. Please choose a time within clinic hours." };
+  }
 }
 
 async function assertNoDoctorConflict({ doctor_id, date, time, excludeId = null }) {
@@ -39,6 +107,51 @@ async function assertNoDoctorConflict({ doctor_id, date, time, excludeId = null 
   }
 }
 
+const BASE_SELECT = `
+  SELECT
+    a.*,
+    a.time::text AS time,
+    TO_CHAR(a.date, 'YYYY-MM-DD') AS date,
+    COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), p.name) AS patient_name,
+    p.phone AS patient_phone,
+    p.email AS patient_email,
+    p.gender AS patient_gender,
+    p.date_of_birth,
+    p.age AS patient_age,
+    bu.email AS booked_by_email,
+    TRIM(CONCAT_WS(' ', bu.first_name, bu.last_name)) AS booked_by_name,
+    u.first_name AS doctor_first_name,
+    u.last_name AS doctor_last_name,
+    TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
+    u.email AS doctor_email,
+    s.specialty_name,
+    s.slug AS specialty_slug,
+    ((a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')) AS is_past,
+    (
+      a.status IN ('COMPLETED','CANCELLED','NO_SHOW')
+      OR (
+        a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED')
+        AND (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')
+      )
+    ) AS is_history,
+    latest_mr.record_id AS latest_record_id,
+    latest_mr.diagnosis AS latest_diagnosis,
+    latest_mr.lab_requests AS requested_services,
+    latest_mr.lab_requests AS lab_requests
+  FROM appointments a
+  JOIN patients p ON a.patient_id = p.id
+  JOIN users u ON a.doctor_id = u.user_id
+  LEFT JOIN users bu ON a.booked_by = bu.user_id
+  LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
+  LEFT JOIN LATERAL (
+    SELECT mr.record_id, mr.diagnosis, mr.lab_requests, mr.visit_date, mr.created_at
+    FROM medical_records mr
+    WHERE mr.appointment_id = a.id
+    ORDER BY COALESCE(mr.visit_date, mr.created_at::date) DESC, mr.record_id DESC
+    LIMIT 1
+  ) latest_mr ON true
+`;
+
 const Appointment = {
   async create({
     patient_id,
@@ -50,14 +163,17 @@ const Appointment = {
     chief_complaint,
     notes,
     booked_by,
+    booked_for = "self",
+    booked_for_relationship = null,
   }) {
+    assertNotPastManila(date, time);
     await assertNoDoctorConflict({ doctor_id, date, time });
 
     const result = await db.query(
       `INSERT INTO appointments
-        (patient_id, doctor_id, specialty_id, date, time, type, chief_complaint, notes, booked_by, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'PENDING')
-       RETURNING *`,
+        (patient_id, doctor_id, specialty_id, date, time, type, chief_complaint, notes, booked_by, booked_for, booked_for_relationship, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'PENDING')
+       RETURNING id`,
       [
         patient_id,
         doctor_id,
@@ -68,6 +184,8 @@ const Appointment = {
         chief_complaint || null,
         notes || null,
         booked_by || null,
+        normalizeBookedFor(booked_for),
+        booked_for_relationship || null,
       ]
     );
 
@@ -85,6 +203,7 @@ const Appointment = {
     doctor_id,
     patient_id,
     search,
+    scope,
     page = 1,
     limit = 20,
   } = {}) {
@@ -100,7 +219,7 @@ const Appointment = {
       conditions.push(`a.doctor_id = $${params.length}`);
     } else if (role === "Patient") {
       params.push(userId);
-      conditions.push(`p.user_id = $${params.length}`);
+      conditions.push(`(p.user_id = $${params.length} OR a.booked_by = $${params.length})`);
     }
 
     if (status) {
@@ -131,6 +250,14 @@ const Appointment = {
       params.push(patient_id);
       conditions.push(`a.patient_id = $${params.length}`);
     }
+    if (scope === "active") {
+      params.push(ACTIVE_VISIBLE_STATUSES);
+      conditions.push(`a.status = ANY($${params.length}) AND (a.date + a.time) > (NOW() AT TIME ZONE 'Asia/Manila')`);
+    }
+    if (scope === "history") {
+      params.push(TERMINAL_STATUSES);
+      conditions.push(`(a.status = ANY($${params.length}) OR (a.status = ANY('{PENDING,CONFIRMED,IN_QUEUE,RESCHEDULED}'::varchar[]) AND (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')))`);
+    }
     if (search) {
       params.push(`%${search}%`);
       conditions.push(`(
@@ -140,6 +267,8 @@ const Appointment = {
         p.phone ILIKE $${params.length} OR
         u.first_name ILIKE $${params.length} OR
         u.last_name ILIKE $${params.length} OR
+        bu.first_name ILIKE $${params.length} OR
+        bu.last_name ILIKE $${params.length} OR
         CAST(a.id AS TEXT) ILIKE $${params.length}
       )`);
     }
@@ -147,41 +276,10 @@ const Appointment = {
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const dataParams = [...params, safeLimit, offset];
 
-    const selectSql = `
-      SELECT
-        a.*,
-        a.time::text AS time,
-        TO_CHAR(a.date, 'YYYY-MM-DD') AS date,
-        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), p.name) AS patient_name,
-        p.phone AS patient_phone,
-        p.email AS patient_email,
-        p.gender AS patient_gender,
-        p.date_of_birth,
-        u.first_name AS doctor_first_name,
-        u.last_name AS doctor_last_name,
-        TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
-        u.email AS doctor_email,
-        s.specialty_name,
-        s.slug AS specialty_slug,
-        latest_mr.record_id AS latest_record_id,
-        latest_mr.diagnosis AS latest_diagnosis,
-        latest_mr.lab_requests AS requested_services,
-        latest_mr.lab_requests AS lab_requests
-      FROM appointments a
-      JOIN patients p ON a.patient_id = p.id
-      JOIN users u ON a.doctor_id = u.user_id
-      LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
-      LEFT JOIN LATERAL (
-        SELECT mr.record_id, mr.diagnosis, mr.lab_requests, mr.visit_date, mr.created_at
-        FROM medical_records mr
-        WHERE mr.appointment_id = a.id
-        ORDER BY COALESCE(mr.visit_date, mr.created_at::date) DESC, mr.record_id DESC
-        LIMIT 1
-      ) latest_mr ON true
-      ${where}
+    const orderSql = `
       ORDER BY
         CASE
-          WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN 0
+          WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') AND (a.date + a.time) > (NOW() AT TIME ZONE 'Asia/Manila') THEN 0
           ELSE 1
         END ASC,
         CASE a.status
@@ -194,18 +292,19 @@ const Appointment = {
           WHEN 'NO_SHOW' THEN 6
           ELSE 9
         END ASC,
-        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.date END ASC NULLS LAST,
-        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.time END ASC NULLS LAST,
-        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.date END DESC NULLS LAST,
-        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') THEN a.time END DESC NULLS LAST,
-        a.id DESC
-      LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
+        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') AND (a.date + a.time) > (NOW() AT TIME ZONE 'Asia/Manila') THEN a.date END ASC NULLS LAST,
+        CASE WHEN a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') AND (a.date + a.time) > (NOW() AT TIME ZONE 'Asia/Manila') THEN a.time END ASC NULLS LAST,
+        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') OR (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila') THEN a.date END DESC NULLS LAST,
+        CASE WHEN a.status NOT IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED') OR (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila') THEN a.time END DESC NULLS LAST,
+        a.id DESC`;
 
+    const selectSql = `${BASE_SELECT} ${where} ${orderSql} LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
     const countSql = `
       SELECT COUNT(*)::int AS count
       FROM appointments a
       JOIN patients p ON a.patient_id = p.id
       JOIN users u ON a.doctor_id = u.user_id
+      LEFT JOIN users bu ON a.booked_by = bu.user_id
       LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
       ${where}`;
 
@@ -226,43 +325,12 @@ const Appointment = {
   },
 
   async findById(id) {
-    const result = await db.query(
-      `SELECT
-         a.*,
-         a.time::text AS time,
-         TO_CHAR(a.date, 'YYYY-MM-DD') AS date,
-         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), p.name) AS patient_name,
-         p.phone AS patient_phone,
-         p.email AS patient_email,
-         p.date_of_birth,
-         p.gender AS patient_gender,
-         TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
-         u.email AS doctor_email,
-         s.specialty_name,
-         s.slug AS specialty_slug,
-         latest_mr.record_id AS latest_record_id,
-         latest_mr.diagnosis AS latest_diagnosis,
-         latest_mr.lab_requests AS requested_services,
-         latest_mr.lab_requests AS lab_requests
-       FROM appointments a
-       JOIN patients p ON a.patient_id = p.id
-       JOIN users u ON a.doctor_id = u.user_id
-       LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
-       LEFT JOIN LATERAL (
-         SELECT mr.record_id, mr.diagnosis, mr.lab_requests, mr.visit_date, mr.created_at
-         FROM medical_records mr
-         WHERE mr.appointment_id = a.id
-         ORDER BY COALESCE(mr.visit_date, mr.created_at::date) DESC, mr.record_id DESC
-         LIMIT 1
-       ) latest_mr ON true
-       WHERE a.id = $1`,
-      [id]
-    );
+    const result = await db.query(`${BASE_SELECT} WHERE a.id = $1`, [id]);
     return result.rows[0] || null;
   },
 
   async getRawById(id) {
-    const result = await db.query("SELECT * FROM appointments WHERE id = $1", [id]);
+    const result = await db.query("SELECT *, time::text AS time, TO_CHAR(date, 'YYYY-MM-DD') AS date FROM appointments WHERE id = $1", [id]);
     return result.rows[0] || null;
   },
 
@@ -292,10 +360,15 @@ const Appointment = {
       throw { statusCode: 400, message: "New date and time are required." };
     }
 
+    assertNotPastManila(date, time, "New appointment schedule");
+
     const current = await this.getRawById(id);
     if (!current) throw { statusCode: 404, message: "Appointment not found." };
     if (["COMPLETED", "CANCELLED", "NO_SHOW", "IN_QUEUE"].includes(current.status)) {
       throw { statusCode: 400, message: `Cannot reschedule an appointment with status ${current.status}.` };
+    }
+    if (isPastManila(current.date, current.time)) {
+      throw { statusCode: 400, message: "Past appointments are history and cannot be rescheduled." };
     }
 
     await assertNoDoctorConflict({
@@ -326,18 +399,7 @@ const Appointment = {
 
   async getTodayByDoctor(doctorId) {
     const result = await db.query(
-      `SELECT
-         a.*,
-         a.time::text AS time,
-         TO_CHAR(a.date, 'YYYY-MM-DD') AS date,
-         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), p.name) AS patient_name,
-         p.phone AS patient_phone,
-         TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS doctor_name,
-         s.specialty_name
-       FROM appointments a
-       JOIN patients p ON a.patient_id = p.id
-       JOIN users u ON a.doctor_id = u.user_id
-       LEFT JOIN specialties s ON a.specialty_id = s.specialty_id
+      `${BASE_SELECT}
        WHERE a.doctor_id = $1
          AND a.date = (NOW() AT TIME ZONE 'Asia/Manila')::date
          AND a.status NOT IN ('CANCELLED','NO_SHOW')
@@ -346,9 +408,98 @@ const Appointment = {
     );
     return result.rows;
   },
+
+  // --------------------------------------------------------------------------
+  // settlePastById
+  //   Settle a SINGLE past, non-terminal appointment into a terminal state.
+  //   Allowed targets: NO_SHOW (patient never came) or CANCELLED (with reason).
+  //   Guards: must exist, must be past, must be currently non-terminal, and
+  //   must not be IN_QUEUE (an in-queue/in-consultation visit is the doctor's
+  //   workflow, not an admin "no show"). Returns the refreshed appointment.
+  // --------------------------------------------------------------------------
+  async settlePastById(id, status, { cancelled_by = null, cancel_reason = null } = {}) {
+    const nextStatus = normalizeStatus(status);
+    if (!["NO_SHOW", "CANCELLED"].includes(nextStatus)) {
+      throw { statusCode: 400, message: "Past appointments can only be settled as NO_SHOW or CANCELLED." };
+    }
+
+    const current = await this.getRawById(id);
+    if (!current) throw { statusCode: 404, message: "Appointment not found." };
+
+    if (TERMINAL_STATUSES.includes(current.status)) {
+      throw { statusCode: 400, message: `Appointment is already ${current.status} and needs no settling.` };
+    }
+    if (!isPastManila(current.date, current.time)) {
+      throw { statusCode: 400, message: "This appointment is not in the past. Use the normal status actions." };
+    }
+    if (current.status === "IN_QUEUE") {
+      throw { statusCode: 400, message: "An in-queue visit is completed through the consultation workflow, not settled here." };
+    }
+    if (nextStatus === "CANCELLED" && !String(cancel_reason || "").trim()) {
+      throw { statusCode: 400, message: "Cancellation reason is required." };
+    }
+
+    const result = await db.query(
+      `UPDATE appointments
+          SET status = $1::varchar,
+              cancelled_by = CASE WHEN $1::varchar = 'CANCELLED' THEN $2::integer ELSE cancelled_by END,
+              cancel_reason = CASE
+                                WHEN $1::varchar = 'CANCELLED' THEN $3::text
+                                WHEN $1::varchar = 'NO_SHOW' THEN COALESCE(cancel_reason, 'Auto/closed: patient did not show.')
+                                ELSE cancel_reason
+                              END,
+              updated_at = NOW()
+        WHERE id = $4::integer
+        RETURNING id`,
+      [nextStatus, cancelled_by, cancel_reason || null, id]
+    );
+
+    if (!result.rows[0]) return null;
+    return this.findById(result.rows[0].id);
+  },
+
+  // --------------------------------------------------------------------------
+  // autoSettlePastAppointments
+  //   Bulk sweep: any PENDING / CONFIRMED / RESCHEDULED appointment whose
+  //   scheduled datetime has passed by more than `graceMinutes` is rolled to
+  //   NO_SHOW so it can never sit in limbo. IN_QUEUE is intentionally excluded
+  //   (the patient arrived; the doctor closes it). Returns the count settled.
+  //   Idempotent and safe to run on an interval.
+  // --------------------------------------------------------------------------
+  async autoSettlePastAppointments({ graceMinutes = 120 } = {}) {
+    const result = await db.query(
+      `UPDATE appointments
+          SET status = 'NO_SHOW',
+              cancel_reason = COALESCE(cancel_reason, 'Auto-closed: appointment time passed without check-in.'),
+              updated_at = NOW()
+        WHERE status IN ('PENDING','CONFIRMED','RESCHEDULED')
+          AND (date + time) <= ((NOW() AT TIME ZONE 'Asia/Manila') - ($1::text || ' minutes')::interval)
+        RETURNING id`,
+      [String(graceMinutes)]
+    );
+    return { settled: result.rowCount, ids: result.rows.map((r) => r.id) };
+  },
+
+  // Move a paid visit from FOR_BILLING to COMPLETED (called after the cashier
+  // records payment).
+  async completeFromBilling(id) {
+    const result = await db.query(
+      `UPDATE appointments
+          SET status = 'COMPLETED', updated_at = NOW()
+        WHERE id = $1 AND status = 'FOR_BILLING'
+        RETURNING id`,
+      [id]
+    );
+    return result.rows[0] || null;
+  },
 };
 
 Appointment.VALID_STATUSES = VALID_STATUSES;
 Appointment.VALID_TYPES = VALID_TYPES;
+Appointment.ACTIVE_VISIBLE_STATUSES = ACTIVE_VISIBLE_STATUSES;
+Appointment.TERMINAL_STATUSES = TERMINAL_STATUSES;
+Appointment.isPastManila = isPastManila;
+Appointment.assertNotPastManila = assertNotPastManila;
+Appointment.assertWithinClinicHours = assertWithinClinicHours;
 
 module.exports = Appointment;

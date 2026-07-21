@@ -16,7 +16,7 @@ import {
   todayISO,
 } from "../../Workflow/ClinicUi";
 
-const ACTIVE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "RESCHEDULED"];
+const ACTIVE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "RESCHEDULED"];
 
 export default function FrontDesk() {
   const navigate = useNavigate();
@@ -59,12 +59,19 @@ export default function FrontDesk() {
     };
   }, [appointments, today]);
 
-  const priority = useMemo(() => {
+  const needsApproval = useMemo(() => {
     return appointments
-      .filter((item) => ["PENDING", "CONFIRMED", "RESCHEDULED"].includes(item.status))
+      .filter((item) => ["PENDING", "RESCHEDULED"].includes(item.status))
       .filter((item) => String(item.date || "").slice(0, 10) >= today)
       .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`))
-      .slice(0, 10);
+      .slice(0, 15);
+  }, [appointments, today]);
+
+  const readyToCheckIn = useMemo(() => {
+    return appointments
+      .filter((item) => item.status === "CONFIRMED" && String(item.date || "").slice(0, 10) === today)
+      .sort((a, b) => `${a.time || ""}`.localeCompare(`${b.time || ""}`))
+      .slice(0, 15);
   }, [appointments, today]);
 
   async function updateStatus(appointment, nextStatus) {
@@ -95,6 +102,70 @@ export default function FrontDesk() {
     }
   }
 
+  const renderWorklist = (title, subtitle, rows, emptyTitle) => (
+    <Panel style={{ overflow: "hidden" }}>
+      <div style={{ padding: "14px 16px", borderBottom: "1px solid #e8eef6" }}>
+        <div style={{ fontWeight: 900, color: "#162235" }}>{title}</div>
+        <div style={{ color: "#6b778c", fontSize: 12 }}>{subtitle}</div>
+      </div>
+      {loading ? (
+        <LoadingState label="Loading appointments..." />
+      ) : rows.length === 0 ? (
+        <EmptyState title={emptyTitle} detail="" />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#f7fafd", color: "#65758b" }}>
+                {["Schedule", "Patient", "Doctor", "Specialty", "Status", "Action"].map((heading) => (
+                  <th key={heading} style={{ textAlign: "left", padding: "11px 14px", fontSize: 11, textTransform: "uppercase" }}>{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((item) => {
+                const isToday = String(item.date || "").slice(0, 10) === today;
+                return (
+                  <tr key={item.id} style={{ borderTop: "1px solid #eef3f9" }}>
+                    <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 900, color: "#162235" }}>{formatDate(item.date)}</div>
+                      <div style={{ color: "#6b778c", fontSize: 12 }}>{formatTime(item.time)}</div>
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <strong style={{ color: "#162235" }}>{item.patient_name}</strong>
+                      <div style={{ color: "#6b778c", fontSize: 12 }}>{item.patient_phone || item.patient_email || ""}</div>
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>{item.doctor_name || "-"}</td>
+                    <td style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
+                    <td style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
+                    <td style={{ padding: "12px 14px" }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {["PENDING", "RESCHEDULED"].includes(item.status) && (
+                          <ActionButton disabled={savingId === item.id} tone="success" onClick={() => updateStatus(item, "CONFIRMED")}>
+                            {isToday ? "Approve and Queue" : "Approve"}
+                          </ActionButton>
+                        )}
+                        {item.status === "CONFIRMED" && isToday && (
+                          <ActionButton disabled={savingId === item.id} onClick={() => updateStatus(item, "IN_QUEUE")}>Check In</ActionButton>
+                        )}
+                        {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(item.status) && (
+                          <ActionButton disabled={savingId === item.id} tone="danger" onClick={() => updateStatus(item, "CANCELLED")}>Cancel</ActionButton>
+                        )}
+                        {item.status === "CONFIRMED" && isToday && (
+                          <ActionButton disabled={savingId === item.id} tone="warning" onClick={() => updateStatus(item, "NO_SHOW")}>No Show</ActionButton>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+
   return (
     <MainLayout pageTitle="Frontdesk Dashboard" pageSubtitle="Approve appointments, check in today's confirmed patients, and manage cancellations or no-shows">
       <div style={{ display: "grid", gap: 14 }}>
@@ -113,80 +184,24 @@ export default function FrontDesk() {
           <Metric label="Future Confirmed" value={stats.confirmedFuture} />
         </div>
 
-        <Panel style={{ overflow: "hidden" }}>
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid #e8eef6", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 900, color: "#162235" }}>Approval and Check-in Worklist</div>
-              <div style={{ color: "#6b778c", fontSize: 12 }}>
-                Same-day approvals enter the live queue. Future approvals stay confirmed until the appointment date.
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
-              <ActionButton onClick={() => navigate("/frontdesk/appointments")}>All Appointments</ActionButton>
-            </div>
-          </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+          <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+          <ActionButton onClick={() => navigate("/frontdesk/appointments")}>All Appointments</ActionButton>
+        </div>
 
-          {loading ? (
-            <LoadingState label="Loading appointments..." />
-          ) : priority.length === 0 ? (
-            <EmptyState title="No frontdesk actions pending" detail="New booking requests and confirmed check-ins will appear here." />
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ background: "#f7fafd", color: "#65758b" }}>
-                    {["Schedule", "Patient", "Doctor", "Specialty", "Status", "Action"].map((heading) => (
-                      <th key={heading} style={{ textAlign: "left", padding: "11px 14px", fontSize: 11, textTransform: "uppercase" }}>{heading}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {priority.map((item) => {
-                    const itemDate = String(item.date || "").slice(0, 10);
-                    const isToday = itemDate === today;
-                    return (
-                      <tr key={item.id} style={{ borderTop: "1px solid #eef3f9" }}>
-                        <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
-                          <div style={{ fontWeight: 900, color: "#162235" }}>{formatDate(item.date)}</div>
-                          <div style={{ color: "#6b778c", fontSize: 12 }}>{formatTime(item.time)}</div>
-                        </td>
-                        <td style={{ padding: "12px 14px" }}>
-                          <strong style={{ color: "#162235" }}>{item.patient_name}</strong>
-                          <div style={{ color: "#6b778c", fontSize: 12 }}>{item.patient_phone || item.patient_email || ""}</div>
-                        </td>
-                        <td style={{ padding: "12px 14px" }}>{item.doctor_name || "-"}</td>
-                        <td style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
-                        <td style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
-                        <td style={{ padding: "12px 14px" }}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {["PENDING", "RESCHEDULED"].includes(item.status) && (
-                              <ActionButton disabled={savingId === item.id} tone="success" onClick={() => updateStatus(item, "CONFIRMED")}>
-                                {isToday ? "Approve and Queue" : "Approve"}
-                              </ActionButton>
-                            )}
-                            {item.status === "CONFIRMED" && isToday && (
-                              <ActionButton disabled={savingId === item.id} onClick={() => updateStatus(item, "IN_QUEUE")}>Check In</ActionButton>
-                            )}
-                            {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(item.status) && (
-                              <ActionButton disabled={savingId === item.id} tone="danger" onClick={() => updateStatus(item, "CANCELLED")}>Cancel</ActionButton>
-                            )}
-                            {item.status === "CONFIRMED" && isToday && (
-                              <ActionButton disabled={savingId === item.id} tone="warning" onClick={() => updateStatus(item, "NO_SHOW")}>No Show</ActionButton>
-                            )}
-                            {item.status === "CONFIRMED" && !isToday && (
-                              <span style={{ color: "#6b778c", fontSize: 12, alignSelf: "center" }}>Waiting for appointment date</span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Panel>
+        {renderWorklist(
+          "Needs Approval",
+          "New bookings waiting for you to confirm. Approving a same-day booking also sends it to the queue.",
+          needsApproval,
+          "No bookings waiting for approval"
+        )}
+
+        {renderWorklist(
+          "Ready to Check In",
+          "Confirmed patients scheduled today - check them in to send them to the nurse queue.",
+          readyToCheckIn,
+          "No one to check in right now"
+        )}
 
         <AppointmentList />
       </div>

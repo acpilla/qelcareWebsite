@@ -32,6 +32,14 @@ const blankRecord = {
   follow_up_notes: "",
 };
 
+// Common diagnostic tests / exams a doctor can order with one click, so the
+// requested workup is specific (CBC, Fecalysis, Eyesight, etc.) instead of free text.
+const COMMON_TESTS = [
+  "CBC", "Urinalysis", "Fecalysis", "Blood Chemistry", "FBS (Blood Sugar)",
+  "Lipid Profile", "Chest X-ray", "ECG", "Visual Acuity (Eyesight)",
+  "Urine Culture", "Pregnancy Test", "COVID-19 Test",
+];
+
 function buildFormFromAppointment(appointment, latestVital) {
   return {
     ...blankRecord,
@@ -128,6 +136,16 @@ export default function MedicalRecords({ appointment, latestVital, onCreated }) 
     }
 
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  // Append a selected test to the requested-labs field (no duplicates).
+  function addTest(test) {
+    setForm((current) => {
+      const existing = String(current.lab_requests || "").trim();
+      const items = existing ? existing.split(/,\s*/).filter(Boolean) : [];
+      if (items.includes(test)) return current;
+      return { ...current, lab_requests: [...items, test].join(", ") };
+    });
   }
 
   async function submit(event) {
@@ -262,7 +280,21 @@ export default function MedicalRecords({ appointment, latestVital, onCreated }) 
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Requested procedures or labs">
-                  <textarea style={{ ...inputStyle, minHeight: 78 }} value={form.lab_requests} onChange={(e) => updateField("lab_requests", e.target.value)} />
+                  {canCreate && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                      {COMMON_TESTS.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => addTest(t)}
+                          style={{ border: "1px solid #d7e2ef", background: "#f1f6fc", color: "#163a6b", borderRadius: 999, padding: "4px 11px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+                        >
+                          + {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea style={{ ...inputStyle, minHeight: 78 }} value={form.lab_requests} onChange={(e) => updateField("lab_requests", e.target.value)} placeholder="Click a test above to add it, or type specific labs/exams (e.g. CBC, Fecalysis, Eyesight)" />
                 </Field>
                 <Field label="Doctor notes">
                   <textarea style={{ ...inputStyle, minHeight: 78 }} value={form.doctor_notes} onChange={(e) => updateField("doctor_notes", e.target.value)} />
@@ -309,6 +341,10 @@ export default function MedicalRecords({ appointment, latestVital, onCreated }) 
                     </div>
                   </div>
                   <StatusBadge status={record.appointment_status || "COMPLETED"} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                  <RecordBlock label="Chief complaint" value={record.chief_complaint} />
+                  <RecordBlock label="Physical exam" value={record.physical_exam} />
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                   <RecordBlock label="Treatment" value={record.treatment_plan} />

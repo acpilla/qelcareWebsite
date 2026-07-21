@@ -208,7 +208,12 @@ function sanitizeReport(report) {
   };
 }
 
-function postJson(urlString, payload, timeoutMs = 12000) {
+// Default timeout is generous because a local Ollama model can take a long time
+// on its FIRST request (cold start: the model has to load into RAM/VRAM).
+// Override with OLLAMA_TIMEOUT_MS in the environment.
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 180000;
+
+function postJson(urlString, payload, timeoutMs = OLLAMA_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
     const body = JSON.stringify(payload);
@@ -255,9 +260,36 @@ function postJson(urlString, payload, timeoutMs = 12000) {
   });
 }
 
+function ollamaConfig() {
+  return {
+    url: (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, ""),
+    model: process.env.OLLAMA_MODEL || "llama3.2",
+    // Keep the model resident in memory between requests so only the FIRST
+    // call after a server (or model) start pays the cold-load cost.
+    keepAlive: process.env.OLLAMA_KEEP_ALIVE || "30m",
+  };
+}
+
+// Fire-and-forget warmup: loads the model into memory shortly after boot so the
+// first real report isn't the one that eats the cold-start delay.
+async function warmupOllama() {
+  const { url, model, keepAlive } = ollamaConfig();
+  try {
+    await postJson(`${url}/api/generate`, {
+      model,
+      prompt: "ok",
+      stream: false,
+      keep_alive: keepAlive,
+      options: { num_predict: 1 },
+    });
+    console.log(`Ollama warmup complete (model: ${model}).`);
+  } catch (err) {
+    console.warn(`Ollama warmup skipped: ${err.message}`);
+  }
+}
+
 async function generateWithOllama({ range, metrics, departmentRows, appointmentDayRows, queueDayRows }) {
-  const ollamaUrl = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
-  const model = process.env.OLLAMA_MODEL || "llama3.2";
+  const { url, model, keepAlive } = ollamaConfig();
   const prompt = `
 Analyze the following clinic operations data and provide a professional administrative report.
 
@@ -281,16 +313,30 @@ ${JSON.stringify({
   }, null, 2)}
 `;
 
-  const response = await postJson(`${ollamaUrl}/api/generate`, {
+  const requestBody = {
     model,
     prompt,
     format: "json",
     stream: false,
+    keep_alive: keepAlive,
     options: {
       temperature: 0.2,
       num_predict: 450,
     },
-  });
+  };
+
+  let response;
+  try {
+    response = await postJson(`${url}/api/generate`, requestBody);
+  } catch (err) {
+    // One retry on a cold-start timeout — the first attempt likely loaded the
+    // model into memory, so the second should be fast.
+    if (String(err.message || "").toLowerCase().includes("timed out")) {
+      response = await postJson(`${url}/api/generate`, requestBody);
+    } else {
+      throw err;
+    }
+  }
 
   const parsed = sanitizeReport(tryParseAiJson(response.response));
   if (!parsed) {
@@ -701,5 +747,7 @@ router.get("/activity/recent", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch activity." });
   }
 });
+
+router.warmupOllama = warmupOllama;
 
 module.exports = router;

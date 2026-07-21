@@ -25,6 +25,7 @@ router.use(authenticate);
 router.use(authorize(["Patient"]));
 
 router.get("/me", ctrl.getMine);
+router.post("/ocr", express.json({ limit: "15mb" }), ctrl.ocrImage);
 router.post("/", upload.single("resultFile"), ctrl.create);
 router.patch("/:id", ctrl.update);
 router.delete("/:id", ctrl.remove);

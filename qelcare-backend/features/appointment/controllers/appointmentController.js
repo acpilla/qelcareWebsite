@@ -1,6 +1,8 @@
 const Appointment = require("../models/Appointment");
 const Patient = require("../../patient/models/Patient");
 const Queue = require("../../queue/models/Queue");
+const Notification = require("../../notification/models/Notification");
+const emailNotifier = require("../../../shared/utils/emailNotifier");
 const logger = require("../../../shared/utils/activityLogger");
 
 const TRANSITIONS = {
@@ -59,6 +61,99 @@ function dateOnly(value) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function cleanText(value, max = 120) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, max) : "";
+}
+
+// Capitalize each word so a relative's "kelly celocia" is stored as "Kelly Celocia".
+function toTitleCase(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
+
+function buildRelative(input = {}) {
+  const relative = input || {};
+  return {
+    first_name: toTitleCase(cleanText(relative.first_name, 80)),
+    last_name: toTitleCase(cleanText(relative.last_name, 80)),
+    relationship: cleanText(relative.relationship, 80),
+    date_of_birth: relative.date_of_birth || null,
+    age: relative.age === "" || relative.age === undefined ? null : Number(relative.age),
+    gender: cleanText(relative.gender, 20) || null,
+    phone: cleanText(relative.phone, 30) || null,
+    email: cleanText(relative.email, 150) || null,
+  };
+}
+
+async function makePatientForBooking({ req, ownerPatient, bookedFor, relative }) {
+  if (bookedFor !== "other") return ownerPatient;
+
+  const r = buildRelative(relative);
+  if (!r.first_name || !r.last_name || !r.relationship) {
+    throw {
+      statusCode: 400,
+      message: "Relative first name, last name, and relationship are required.",
+    };
+  }
+  if (r.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) {
+    throw { statusCode: 400, message: "Relative email is invalid." };
+  }
+
+  return Patient.create({
+    first_name: r.first_name,
+    last_name: r.last_name,
+    date_of_birth: r.date_of_birth,
+    age: Number.isFinite(r.age) ? r.age : null,
+    gender: r.gender,
+    phone: r.phone,
+    contact: r.phone,
+    email: r.email,
+    address: ownerPatient.address || null,
+    created_by: req.user.user_id,
+    notes: `One-time relative booking by patient account #${ownerPatient.id}. Relationship: ${r.relationship}.`,
+  });
+}
+
+async function notifyPatient({ userId, appointment, title, message, type = "appointment" }) {
+  try {
+    await Notification.create({
+      user_id: userId,
+      type,
+      title,
+      message,
+      link: "/patient/appointments",
+      appointment_id: appointment.id,
+      metadata: {
+        status: appointment.status,
+        date: appointment.date,
+        time: appointment.time,
+        booked_for: appointment.booked_for,
+      },
+    });
+  } catch (err) {
+    console.error("Notification create error:", err.message);
+  }
+}
+
+async function emailPatient({ appointment, status }) {
+  try {
+    await emailNotifier.sendAppointmentNotification({
+      to: appointment.patient_email || appointment.booked_by_email,
+      patientName: appointment.patient_name,
+      doctorName: appointment.doctor_name,
+      specialtyName: appointment.specialty_name,
+      date: appointment.date,
+      time: appointment.time,
+      status,
+    });
+  } catch (err) {
+    console.error("Appointment email notification error:", err.message);
+  }
+}
+
 const appointmentController = {
   async create(req, res) {
     try {
@@ -73,6 +168,7 @@ const appointmentController = {
       const appointment = await Appointment.create({
         ...req.body,
         booked_by: req.user.user_id,
+        booked_for: req.body.booked_for || "self",
       });
 
       await logger.log({
@@ -109,9 +205,21 @@ const appointmentController = {
         doctor_id,
         patient_id,
         search,
+        scope,
         page = 1,
         limit = 20,
       } = req.query;
+
+      // Lazy sweep: when staff open the list, roll any long-past, never-resolved
+      // appointments to NO_SHOW so nothing sits stuck as PENDING. Cheap, idempotent,
+      // and a safety net in case the background interval isn't running.
+      if (role === "Admin" || role === "Frontdesk") {
+        try {
+          await Appointment.autoSettlePastAppointments({ graceMinutes: 120 });
+        } catch (sweepErr) {
+          console.error("Lazy auto-settle error:", sweepErr.message);
+        }
+      }
 
       const result = await Appointment.findAll({
         role,
@@ -124,6 +232,7 @@ const appointmentController = {
         doctor_id,
         patient_id,
         search,
+        scope,
         page,
         limit,
       });
@@ -170,6 +279,65 @@ const appointmentController = {
       const current = await Appointment.getRawById(req.params.id);
       if (!current) return res.status(404).json({ success: false, message: "Appointment not found." });
 
+      const isPast = Appointment.isPastManila(current.date, current.time);
+
+      // --- PAST appointments ---------------------------------------------
+      // A past appointment that was never completed/cancelled must not be left
+      // hanging as PENDING/CONFIRMED forever. Admin/Frontdesk may SETTLE it as
+      // NO_SHOW or CANCELLED. Forward transitions (CONFIRMED/IN_QUEUE) make no
+      // sense for a past date and stay blocked.
+      if (isPast) {
+        if (!["NO_SHOW", "CANCELLED"].includes(nextStatus)) {
+          return res.status(400).json({
+            success: false,
+            message: "This appointment is in the past. It can only be settled as No Show or Cancelled.",
+          });
+        }
+        if (Appointment.TERMINAL_STATUSES.includes(current.status)) {
+          return res.status(400).json({
+            success: false,
+            message: `Appointment is already ${current.status}.`,
+          });
+        }
+        if (nextStatus === "CANCELLED" && !String(cancel_reason || "").trim()) {
+          return res.status(400).json({ success: false, message: "Cancellation reason is required." });
+        }
+
+        const settled = await Appointment.settlePastById(req.params.id, nextStatus, {
+          cancelled_by: req.user.user_id,
+          cancel_reason,
+        });
+
+        if (settled?.booked_by) {
+          await notifyPatient({
+            userId: settled.booked_by,
+            appointment: settled,
+            title: `Appointment ${nextStatus.replace("_", " ").toLowerCase()}`,
+            message: `Appointment #${settled.id} for ${settled.patient_name} was marked ${nextStatus.replace("_", " ").toLowerCase()}.`,
+            type: "appointment_status",
+          });
+          await emailPatient({ appointment: settled, status: nextStatus });
+        }
+
+        await logger.log({
+          userId: req.user.user_id,
+          action: "APPT_SETTLED",
+          entityType: "appointment",
+          entityId: settled.id,
+          description: `Past appointment #${settled.id} settled from ${current.status} to ${nextStatus}`,
+          ip: logger.getIP(req),
+          metadata: { from: current.status, to: nextStatus, cancel_reason: cancel_reason || null, past: true },
+        });
+
+        return res.json({
+          success: true,
+          message: `Past appointment settled as ${nextStatus.replace("_", " ").toLowerCase()}.`,
+          data: settled,
+          appointment: settled,
+        });
+      }
+
+      // --- FUTURE / TODAY appointments (normal workflow) -----------------
       if (!canTransition(current.status, nextStatus)) {
         return res.status(400).json({
           success: false,
@@ -212,6 +380,17 @@ const appointmentController = {
         appointment = await Appointment.findById(req.params.id);
         finalStatus = "IN_QUEUE";
         message = "Appointment added to today's queue.";
+      }
+
+      if (appointment.booked_by) {
+        await notifyPatient({
+          userId: appointment.booked_by,
+          appointment,
+          title: `Appointment ${finalStatus.replace("_", " ").toLowerCase()}`,
+          message: `Appointment #${appointment.id} for ${appointment.patient_name} is ${finalStatus.replace("_", " ").toLowerCase()}.`,
+          type: "appointment_status",
+        });
+        await emailPatient({ appointment, status: finalStatus });
       }
 
       await logger.log({
@@ -257,6 +436,17 @@ const appointmentController = {
       const { date, time } = req.body;
       const appointment = await Appointment.reschedule(req.params.id, { date, time });
 
+      if (appointment.booked_by) {
+        await notifyPatient({
+          userId: appointment.booked_by,
+          appointment,
+          title: "Appointment rescheduled",
+          message: `Appointment #${appointment.id} for ${appointment.patient_name} was rescheduled to ${appointment.date} ${appointment.time}.`,
+          type: "appointment_rescheduled",
+        });
+        await emailPatient({ appointment, status: "RESCHEDULED" });
+      }
+
       await logger.log({
         userId: req.user.user_id,
         action: "APPT_RESCHEDULED",
@@ -292,8 +482,8 @@ const appointmentController = {
 
   async bookMyAppointment(req, res) {
     try {
-      const patient = await Patient.findByUserId(req.user.user_id);
-      if (!patient) {
+      const ownerPatient = await Patient.findByUserId(req.user.user_id);
+      if (!ownerPatient) {
         return res.status(404).json({ success: false, message: "Patient profile not found. Contact the clinic." });
       }
 
@@ -302,20 +492,48 @@ const appointmentController = {
         return res.status(400).json({ success: false, message: "doctor_id, date, and time are required." });
       }
 
+      Appointment.assertNotPastManila(date, time);
+      Appointment.assertWithinClinicHours(time);
+
+      const bookedFor = String(req.body.booked_for || "self").toLowerCase() === "other" ? "other" : "self";
+      const targetPatient = await makePatientForBooking({
+        req,
+        ownerPatient,
+        bookedFor,
+        relative: req.body.relative,
+      });
+
+      const relative = bookedFor === "other" ? buildRelative(req.body.relative) : null;
       const appointment = await Appointment.create({
         ...req.body,
-        patient_id: patient.id,
+        patient_id: targetPatient.id,
         booked_by: req.user.user_id,
+        booked_for: bookedFor,
+        booked_for_relationship: bookedFor === "other" ? relative.relationship : null,
         type: req.body.type || "consultation",
       });
+
+      await notifyPatient({
+        userId: req.user.user_id,
+        appointment,
+        title: "Appointment request submitted",
+        message: `Appointment #${appointment.id} for ${appointment.patient_name} is pending clinic confirmation.`,
+        type: "appointment_booked",
+      });
+      await emailPatient({ appointment, status: "PENDING" });
 
       await logger.log({
         userId: req.user.user_id,
         action: "APPT_CREATED",
         entityType: "appointment",
         entityId: appointment.id,
-        description: `Patient self-booked appointment on ${date} ${time}`,
+        description: `Patient booked appointment for ${bookedFor === "other" ? "relative" : "self"} on ${date} ${time}`,
         ip: logger.getIP(req),
+        metadata: {
+          booked_for: bookedFor,
+          target_patient_id: targetPatient.id,
+          owner_patient_id: ownerPatient.id,
+        },
       });
 
       res.status(201).json({
@@ -339,14 +557,201 @@ const appointmentController = {
       const result = await Appointment.findAll({
         role: "Patient",
         userId: req.user.user_id,
+        scope: req.query.scope,
         page: req.query.page || 1,
-        limit: req.query.limit || 20,
+        limit: req.query.limit || 100,
       });
 
       res.json({ success: true, ...result });
     } catch (err) {
       console.error("Get my appointments error:", err);
       res.status(500).json({ success: false, message: "Failed to fetch appointments." });
+    }
+  },
+
+  // Patient cancels their OWN appointment (PENDING/CONFIRMED/RESCHEDULED, not past,
+  // not already in the live queue). Ownership is enforced via booked_by.
+  async cancelMine(req, res) {
+    try {
+      const current = await Appointment.getRawById(req.params.id);
+      if (!current) return res.status(404).json({ success: false, message: "Appointment not found." });
+      if (Number(current.booked_by) !== Number(req.user.user_id)) {
+        return res.status(403).json({ success: false, message: "You can only cancel your own appointments." });
+      }
+      if (Appointment.TERMINAL_STATUSES.includes(current.status)) {
+        return res.status(400).json({ success: false, message: `This appointment is already ${current.status.toLowerCase().replace("_", " ")}.` });
+      }
+      if (Appointment.isPastManila(current.date, current.time)) {
+        return res.status(400).json({ success: false, message: "This appointment time has already passed. Please contact the clinic." });
+      }
+      // Once the clinic confirms (or you're in the queue), self-service is locked.
+      // The patient must call the clinic so staff can adjust the schedule/queue.
+      if (!["PENDING", "RESCHEDULED"].includes(current.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "This appointment is already confirmed by the clinic. To change or cancel it, please call the clinic at (02) 8842-5405.",
+        });
+      }
+
+      const reason = String(req.body.cancel_reason || "").trim() || "Cancelled by patient.";
+      const appointment = await Appointment.updateStatus(req.params.id, "CANCELLED", {
+        cancelled_by: req.user.user_id,
+        cancel_reason: reason,
+      });
+
+      await notifyPatient({
+        userId: req.user.user_id,
+        appointment,
+        title: "Appointment cancelled",
+        message: `You cancelled appointment #${appointment.id} for ${appointment.patient_name}.`,
+        type: "appointment_status",
+      });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "APPT_CANCELLED_BY_PATIENT",
+        entityType: "appointment",
+        entityId: appointment.id,
+        description: `Patient cancelled appointment #${appointment.id}`,
+        ip: logger.getIP(req),
+        metadata: { reason, from: current.status },
+      });
+
+      res.json({ success: true, message: "Appointment cancelled.", data: appointment, appointment });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error("Patient cancel error:", err);
+      res.status(500).json({ success: false, message: "Failed to cancel appointment." });
+    }
+  },
+
+  // Patient edits (reschedules) their OWN appointment. Only allowed before the
+  // clinic confirms it (PENDING/RESCHEDULED). Re-validates future + clinic hours,
+  // and the reschedule() model call keeps it PENDING for re-confirmation.
+  async editMine(req, res) {
+    try {
+      const current = await Appointment.getRawById(req.params.id);
+      if (!current) return res.status(404).json({ success: false, message: "Appointment not found." });
+      if (Number(current.booked_by) !== Number(req.user.user_id)) {
+        return res.status(403).json({ success: false, message: "You can only edit your own appointments." });
+      }
+      if (!["PENDING", "RESCHEDULED"].includes(current.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Only pending appointments can be edited. Please contact the clinic to change a confirmed appointment.",
+        });
+      }
+
+      const { date, time } = req.body;
+      if (!date || !time) {
+        return res.status(400).json({ success: false, message: "New date and time are required." });
+      }
+      Appointment.assertNotPastManila(date, time, "New appointment schedule");
+      Appointment.assertWithinClinicHours(time);
+
+      const appointment = await Appointment.reschedule(req.params.id, { date, time });
+
+      await notifyPatient({
+        userId: req.user.user_id,
+        appointment,
+        title: "Appointment updated",
+        message: `You updated appointment #${appointment.id} to ${appointment.date} ${appointment.time}. It is pending clinic confirmation.`,
+        type: "appointment_rescheduled",
+      });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "APPT_EDITED_BY_PATIENT",
+        entityType: "appointment",
+        entityId: appointment.id,
+        description: `Patient edited appointment #${appointment.id} to ${date} ${time}`,
+        ip: logger.getIP(req),
+      });
+
+      res.json({
+        success: true,
+        message: "Appointment updated. It will stay pending until the clinic confirms it.",
+        data: appointment,
+        appointment,
+      });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error("Patient edit error:", err);
+      res.status(500).json({ success: false, message: "Failed to update appointment." });
+    }
+  },
+
+  // Explicit settle endpoint (POST /appointments/:id/settle). Equivalent to
+  // updateStatus on a past appointment but with a purpose-built route so the
+  // frontend can call it unambiguously.
+  async settlePast(req, res) {
+    try {
+      if (!hasRole(req, ["Admin", "Frontdesk"])) {
+        return res.status(403).json({ success: false, message: `${req.user?.role || "This role"} cannot settle appointments.` });
+      }
+      const nextStatus = normalizeStatus(req.body.status);
+      const { cancel_reason } = req.body;
+
+      const settled = await Appointment.settlePastById(req.params.id, nextStatus, {
+        cancelled_by: req.user.user_id,
+        cancel_reason,
+      });
+      if (!settled) return res.status(404).json({ success: false, message: "Appointment not found." });
+
+      if (settled.booked_by) {
+        await notifyPatient({
+          userId: settled.booked_by,
+          appointment: settled,
+          title: `Appointment ${nextStatus.replace("_", " ").toLowerCase()}`,
+          message: `Appointment #${settled.id} for ${settled.patient_name} was marked ${nextStatus.replace("_", " ").toLowerCase()}.`,
+          type: "appointment_status",
+        });
+        await emailPatient({ appointment: settled, status: nextStatus });
+      }
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "APPT_SETTLED",
+        entityType: "appointment",
+        entityId: settled.id,
+        description: `Past appointment #${settled.id} settled to ${nextStatus}`,
+        ip: logger.getIP(req),
+        metadata: { to: nextStatus, cancel_reason: cancel_reason || null, past: true },
+      });
+
+      res.json({ success: true, message: `Appointment settled as ${nextStatus.replace("_", " ").toLowerCase()}.`, data: settled, appointment: settled });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      console.error("Settle appointment error:", err);
+      res.status(500).json({ success: false, message: "Failed to settle appointment." });
+    }
+  },
+
+  // Manual bulk sweep (POST /appointments/sweep-past). Admin only.
+  async sweepPast(req, res) {
+    try {
+      if (!hasRole(req, ["Admin"])) {
+        return res.status(403).json({ success: false, message: "Only Admin can run the sweep." });
+      }
+      const graceMinutes = Number(req.body.grace_minutes);
+      const result = await Appointment.autoSettlePastAppointments({
+        graceMinutes: Number.isFinite(graceMinutes) ? graceMinutes : 120,
+      });
+
+      await logger.log({
+        userId: req.user.user_id,
+        action: "APPT_SWEEP",
+        entityType: "appointment",
+        entityId: null,
+        description: `Manual sweep settled ${result.settled} past appointment(s) to NO_SHOW.`,
+        ip: logger.getIP(req),
+        metadata: result,
+      });
+
+      res.json({ success: true, message: `${result.settled} past appointment(s) settled.`, ...result });
+    } catch (err) {
+      console.error("Sweep past error:", err);
+      res.status(500).json({ success: false, message: "Failed to sweep past appointments." });
     }
   },
 };

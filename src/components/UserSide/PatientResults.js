@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Tesseract from "tesseract.js";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.entry";
-import { API_URL, authFetch, getToken } from "../../utils/auth";
+import { authFetch, getToken, API_URL } from "../../utils/auth";
 import {
   ActionButton,
   EmptyState,
@@ -12,6 +11,7 @@ import {
   Panel,
   formatDate,
   inputStyle,
+  todayISO,
 } from "../Workflow/ClinicUi";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -81,13 +81,15 @@ function inferFacility(text) {
   return lines.find((line) => /(clinic|hospital|laboratory|diagnostic|medical center|healthcare|lab)/i.test(line) && line.length <= 120) || "";
 }
 
-function inferFields(text, file) {
+function inferFields(text, file, detectedType = "") {
   const fallbackTitle = file?.name ? file.name.replace(/\.[^.]+$/, "") : "Uploaded Medical Result";
   return {
-    title: firstMeaningfulLine(text) || fallbackTitle,
-    result_type: inferResultType(text, file?.name || ""),
+    title: firstMeaningfulLine(text) || detectedType || fallbackTitle,
+    // Prefer the document type the AI detected from the image itself (works even
+    // for image-only films like an X-ray); fall back to text-based inference.
+    result_type: detectedType || inferResultType(text, file?.name || ""),
     source_facility: inferFacility(text),
-    result_date: toISODate(text),
+    result_date: toISODate(text) || todayISO(), // default the upload's date to today when none is detected
     extracted_text: text,
   };
 }
@@ -103,15 +105,49 @@ async function renderPdfPageToImage(pdf, pageNumber) {
   return canvas.toDataURL("image/png");
 }
 
+// Returns { base64, mimeType } from a File, Blob, or dataURL string.
+async function toBase64(source) {
+  if (typeof source === "string" && source.startsWith("data:")) {
+    const [header, base64] = source.split(",");
+    const mimeType = header.match(/:(.*?);/)?.[1] || "image/png";
+    return { base64, mimeType };
+  }
+  if (source instanceof Blob || source instanceof File) {
+    const mimeType = source.type || "image/jpeg";
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsDataURL(source);
+    });
+    return { base64, mimeType };
+  }
+  throw new Error("Unsupported image source.");
+}
+
+// Sends image to the backend Gemini proxy and returns extracted text.
 async function recognizeImage(source, onProgress) {
-  const result = await Tesseract.recognize(source, "eng", {
-    logger: (message) => {
-      if (message.status === "recognizing text") {
-        onProgress(Math.round((message.progress || 0) * 100));
-      }
-    },
+  onProgress(15);
+
+  const { base64, mimeType } = await toBase64(source);
+
+  onProgress(30);
+
+  const response = await authFetch("/patient-results/ocr", {
+    method: "POST",
+    body: JSON.stringify({ image: base64, mime_type: mimeType }),
   });
-  return result?.data?.text || "";
+
+  onProgress(90);
+
+  const payload = await response.json();
+
+  if (!response.ok || payload.success === false) {
+    throw new Error(payload.message || "Text extraction failed.");
+  }
+
+  onProgress(100);
+  return { text: payload.text || "", documentType: payload.document_type || "" };
 }
 
 function ResultCard({ item, selected, onSelect, onDelete }) {
@@ -154,7 +190,7 @@ export default function PatientResults() {
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(emptyForm);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -195,7 +231,7 @@ export default function PatientResults() {
   const startNew = () => {
     setSelected(null);
     setForm(emptyForm);
-    setFile(null);
+    setFiles([]);
     setMessage(null);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -211,7 +247,7 @@ export default function PatientResults() {
       extracted_text: item.extracted_text || "",
       summary_notes: item.summary_notes || "",
     });
-    setFile(null);
+    setFiles([]);
     setMessage(null);
     setError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -223,38 +259,45 @@ export default function PatientResults() {
   };
 
   const runOcr = async () => {
-    if (!file) {
-      setError("Choose an image or PDF file first.");
+    if (!files.length) {
+      setError("Choose one or more image/PDF files first.");
       return;
     }
 
     setOcrBusy(true);
     setOcrProgress(0);
     setError(null);
-    setMessage("OCR is reading the uploaded result. Please review the text after extraction.");
+    setMessage("AI Vision is reading the uploaded result(s). Please review the text after extraction.");
 
     try {
-      let text = "";
-      if (fileType(file) === "pdf") {
-        const data = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data }).promise;
-        const pageCount = Math.min(pdf.numPages, MAX_PDF_PAGES);
-        const chunks = [];
-        for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
-          setMessage(`OCR processing PDF page ${pageNo} of ${pageCount}.`);
-          const image = await renderPdfPageToImage(pdf, pageNo);
-          const pageText = await recognizeImage(image, (percent) => {
-            const overall = Math.round(((pageNo - 1) / pageCount) * 100 + (percent / pageCount));
-            setOcrProgress(overall);
-          });
-          chunks.push(`Page ${pageNo}\n${pageText}`);
+      const chunks = [];
+      let detectedType = "";
+      // Read every page of every selected file and merge them into one result,
+      // so a result/prescription split across multiple photos or pages reads as one.
+      for (let fi = 0; fi < files.length; fi += 1) {
+        const f = files[fi];
+        const prefix = files.length > 1 ? `File ${fi + 1}` : "";
+        if (fileType(f) === "pdf") {
+          const data = await f.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data }).promise;
+          const pageCount = Math.min(pdf.numPages, MAX_PDF_PAGES);
+          for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
+            setMessage(files.length > 1 ? `AI Vision reading file ${fi + 1} of ${files.length} (page ${pageNo}/${pageCount}).` : `AI Vision processing PDF page ${pageNo} of ${pageCount}.`);
+            const image = await renderPdfPageToImage(pdf, pageNo);
+            const pageResult = await recognizeImage(image, (percent) => setOcrProgress(percent));
+            if (!detectedType && pageResult.documentType) detectedType = pageResult.documentType;
+            chunks.push(`${prefix ? prefix + " " : ""}Page ${pageNo}\n${pageResult.text}`);
+          }
+        } else {
+          setMessage(files.length > 1 ? `AI Vision reading file ${fi + 1} of ${files.length}.` : "AI Vision is reading the uploaded result.");
+          const result = await recognizeImage(f, setOcrProgress);
+          if (!detectedType && result.documentType) detectedType = result.documentType;
+          chunks.push(`${prefix ? prefix + "\n" : ""}${result.text}`);
         }
-        text = chunks.join("\n\n");
-      } else {
-        text = await recognizeImage(file, setOcrProgress);
       }
+      const text = chunks.join("\n\n");
 
-      const inferred = inferFields(text, file);
+      const inferred = inferFields(text, files[0], detectedType);
       setForm((current) => ({
         ...current,
         title: current.title || inferred.title,
@@ -263,9 +306,9 @@ export default function PatientResults() {
         result_date: current.result_date || inferred.result_date,
         extracted_text: inferred.extracted_text,
       }));
-      setMessage("OCR complete. Review and edit the fields before saving.");
+      setMessage("AI Vision extraction complete. Review and edit the fields before saving.");
     } catch (err) {
-      setError(err.message || "OCR failed. You can still type the result manually.");
+      setError(err.message || "Text extraction failed. You can still type the result manually.");
     } finally {
       setOcrBusy(false);
       setOcrProgress(100);
@@ -293,7 +336,7 @@ export default function PatientResults() {
         const token = getToken();
         const body = new FormData();
         Object.entries(form).forEach(([key, value]) => body.append(key, value || ""));
-        if (file) body.append("resultFile", file);
+        if (files[0]) body.append("resultFile", files[0]); // store the first page; combined text from all files is in extracted_text
         response = await fetch(`${API_URL}/patient-results`, {
           method: "POST",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -336,7 +379,7 @@ export default function PatientResults() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 900, color: "#162235" }}>Medical Results Tracking</div>
-            <div style={{ color: "#6b778c", fontSize: 13, marginTop: 3 }}>Save personal copies of printed medical papers for your own tracking. OCR only fills text fields; this is not an official clinic, laboratory, or diagnostic submission.</div>
+            <div style={{ color: "#6b778c", fontSize: 13, marginTop: 3 }}>Save personal copies of printed medical papers for your own tracking. AI Vision only fills text fields; this is not an official clinic, laboratory, or diagnostic submission.</div>
           </div>
           <ActionButton onClick={startNew}>New Result</ActionButton>
         </div>
@@ -374,33 +417,35 @@ export default function PatientResults() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 900, color: "#162235" }}>{selected ? "Edit Tracked Medical Paper" : "Upload Personal Medical Paper"}</div>
-              <div style={{ color: "#6b778c", fontSize: 12, marginTop: 3 }}>OCR extracts text only. Review everything before saving to your personal tracker. Staff do not treat this as an official uploaded result.</div>
+              <div style={{ color: "#6b778c", fontSize: 12, marginTop: 3 }}>AI Vision extracts text only. Review everything before saving to your personal tracker. Staff do not treat this as an official uploaded result.</div>
             </div>
-            {ocrBusy && <div style={{ color: "#163a6b", fontWeight: 900, fontSize: 13 }}>OCR {ocrProgress}%</div>}
+            {ocrBusy && <div style={{ color: "#163a6b", fontWeight: 900, fontSize: 13 }}>Reading... {ocrProgress}%</div>}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
             {!selected && (
-              <Field label="Upload file">
+              <Field label="Upload file(s)">
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept={ACCEPTED_FILES}
-                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                  onChange={(event) => setFiles(Array.from(event.target.files || []))}
                   style={inputStyle}
                 />
+                {files.length > 0 && <div style={{ fontSize: 11, color: "#6b778c", marginTop: 4 }}>{files.length} file(s) selected — all pages are read together.</div>}
               </Field>
             )}
             {!selected && (
-              <Field label="OCR option">
-                <ActionButton disabled={!file || ocrBusy} onClick={runOcr}>{ocrBusy ? "Reading file..." : "Run OCR"}</ActionButton>
+              <Field label="AI Vision">
+                <ActionButton disabled={!files.length || ocrBusy} onClick={runOcr}>{ocrBusy ? "Reading file..." : "Extract Text"}</ActionButton>
               </Field>
             )}
             <Field label="Title">
               <input name="title" value={form.title} onChange={setField} style={inputStyle} placeholder="Personal medical paper copy" />
             </Field>
-            <Field label="Result type">
-              <input name="result_type" value={form.result_type} onChange={setField} style={inputStyle} placeholder="Personal medical paper type" />
+            <Field label="Document type">
+              <input name="result_type" value={form.result_type} onChange={setField} style={inputStyle} placeholder="e.g. Chest X-ray, CBC, Prescription (auto-detected by AI)" />
             </Field>
             <Field label="Source facility">
               <input name="source_facility" value={form.source_facility} onChange={setField} style={inputStyle} placeholder="Clinic, hospital, or diagnostic center" />
@@ -412,7 +457,7 @@ export default function PatientResults() {
 
           <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
             <Field label="Extracted text">
-              <textarea name="extracted_text" value={form.extracted_text} onChange={setField} rows={12} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="OCR text or manually typed result details" />
+              <textarea name="extracted_text" value={form.extracted_text} onChange={setField} rows={12} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="AI Vision text or manually typed result details" />
             </Field>
             <Field label="Summary notes">
               <textarea name="summary_notes" value={form.summary_notes} onChange={setField} rows={4} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} placeholder="Your own notes, reminders, or tracking details. This is not a diagnosis or official clinic result." />

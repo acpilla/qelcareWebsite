@@ -307,7 +307,7 @@ const Queue = {
       );
 
       const appointmentStatus =
-        nextStatus === "DONE" ? "COMPLETED" :
+        nextStatus === "DONE" ? "FOR_BILLING" : // consultation finished -> awaiting cashier payment
         nextStatus === "NO_SHOW" ? "NO_SHOW" :
         nextStatus === "CANCELLED" ? "CANCELLED" :
         "IN_QUEUE";

@@ -1,0 +1,75 @@
+/* ============================================================
+   FILE: src/components/Layout/adminPolish.css
+   ------------------------------------------------------------
+   Gentle, app-wide UI polish loaded once via MainLayout.
+   Rules are intentionally additive — they only set properties
+   that inline styles leave unset (box-shadow on focus, filter
+   on hover, transform on press, transitions, scrollbars) — so
+   they enhance every screen without overriding existing layout
+   or colors. No structural/behavioral changes.
+   ============================================================ */
+
+/* Smooth, tactile controls everywhere */
+button,
+input,
+select,
+textarea,
+a[role="button"] {
+  transition: filter 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease, background-color 0.15s ease;
+}
+
+/* Universal hover/press feedback for buttons.
+   `filter` and `transform` are not set inline anywhere, so this
+   works regardless of each button's inline background color. */
+button:not(:disabled):hover {
+  filter: brightness(0.96);
+}
+button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+/* Accessible focus ring. Uses box-shadow (not set inline on
+   form controls) so it shows even where inline styles set
+   `outline: none`. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  box-shadow: 0 0 0 3px rgba(22, 58, 107, 0.18);
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(22, 58, 107, 0.45);
+  outline-offset: 2px;
+}
+
+/* Refined, less obtrusive scrollbars for table/overflow panes */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c7d4e3;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #aebfd3;
+  background-clip: content-box;
+}
+
+/* Firefox scrollbar styling */
+* {
+  scrollbar-color: #c7d4e3 transparent;
+  scrollbar-width: thin;
+}
+
+/* Crisper text rendering for the admin UI */
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

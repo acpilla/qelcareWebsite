@@ -2,19 +2,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
+import { C as COLORS } from "../../../utils/adminTheme";
 
-const COLORS = {
-  navy: "#0f2744",
-  blue: "#163a6b",
-  teal: "#1f7a6f",
-  green: "#1f7a52",
-  amber: "#8a5a12",
-  red: "#a03a3a",
-  purple: "#5a3a8a",
-  gray: "#66778a",
-  border: "#e4ecf5",
-  soft: "#f8fbfd",
-};
+const EXPORT_COLUMNS = [
+  { header: "Time", value: (log) => formatDateTime(log.created_at) },
+  { header: "Actor", value: (log) => actorName(log) },
+  { header: "Role", value: (log) => log.role_name || log.username || "System" },
+  { header: "Action", value: (log) => formatAction(log.action) },
+  { header: "Entity", value: (log) => `${entityMeta(log.entity_type).label}${log.entity_id ? ` #${log.entity_id}` : ""}` },
+  { header: "Description", value: (log) => log.description || "" },
+  { header: "IP Address", value: (log) => log.ip_address || "" },
+];
 
 const ENTITY_META = {
   appointment: { label: "Appointment", color: COLORS.blue, bg: "#eef3fb" },
@@ -285,12 +284,23 @@ export default function AdminLogs() {
                   : `${safeNumber(pagination.total).toLocaleString()} log${safeNumber(pagination.total) === 1 ? "" : "s"} found`}
               </p>
             </div>
-            <button className="al-icon-button" type="button" onClick={loadLogs} title="Refresh logs">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
-            </button>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <ExportMenu
+                filename="qelcare-activity-logs"
+                title="QELCare Activity Logs"
+                subtitle={`Current page — ${logs.length} log${logs.length === 1 ? "" : "s"} (page ${currentPage} of ${totalPages})`}
+                sheetTitle="Activity Logs"
+                columns={EXPORT_COLUMNS}
+                rows={logs}
+                disabled={loading}
+              />
+              <button className="al-icon-button" type="button" onClick={loadLogs} title="Refresh logs">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10" />
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <form className="al-filters" onSubmit={applyFilters}>

@@ -15,6 +15,8 @@ const passwordValid = (pw) => Object.values(checkPassword(pw)).every(Boolean);
 export default function EmailVerification() {
   const navigate  = useNavigate();
   const email     = sessionStorage.getItem("otp_email") || "";
+  const flow      = sessionStorage.getItem("otp_flow") || "password_reset";
+  const isRegistration = flow === "registration";
 
   const [view, setView]               = useState("verify");   // "verify" | "reset"
   const [code, setCode]               = useState(["","","","","",""]);
@@ -31,8 +33,8 @@ export default function EmailVerification() {
 
   // Redirect if no email in session
   useEffect(() => {
-    if (!email) navigate("/forgot-password");
-  }, [email, navigate]);
+    if (!email) navigate(isRegistration ? "/register" : "/forgot-password");
+  }, [email, isRegistration, navigate]);
 
   // Countdown timer
   useEffect(() => {
@@ -55,14 +57,32 @@ export default function EmailVerification() {
     if (e.key === "Backspace" && !code[i] && i > 0) inputs.current[i - 1]?.focus();
   };
 
+  // Let the user paste the whole 6-digit code from their email; distribute the
+  // digits across the boxes (non-digits stripped).
+  const handleCodePaste = (e) => {
+    const digits = (e.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    if (!digits) return;
+    e.preventDefault();
+    const next = ["", "", "", "", "", ""];
+    for (let j = 0; j < digits.length; j += 1) next[j] = digits[j];
+    setCode(next);
+    setError("");
+    inputs.current[Math.min(digits.length, 5)]?.focus();
+  };
+
   // -- Verify OTP --------------------------------------------
   const handleVerify = async () => {
+    if (loading) return;
     const fullCode = code.join("");
     if (fullCode.length !== 6) return setError("Please enter all 6 digits.");
 
     setLoading(true); setError("");
     try {
-      const res  = await fetch(`${API_URL}/auth/otp/verify`, {
+      const endpoint = isRegistration
+        ? `${API_URL}/auth/patient/register/verify`
+        : `${API_URL}/auth/otp/verify`;
+
+      const res  = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, code: fullCode }),
@@ -70,10 +90,22 @@ export default function EmailVerification() {
       const data = await res.json();
 
       if (data.success) {
-        setSuccess("Code verified! Please set your new password.");
-        setTimeout(() => { setView("reset"); setSuccess(""); }, 1200);
+        if (isRegistration) {
+          setSuccess(data.message || "Account verified! Redirecting to login...");
+          sessionStorage.removeItem("otp_email");
+          sessionStorage.removeItem("otp_flow");
+          sessionStorage.removeItem("otp_code");
+          setTimeout(() => navigate("/login"), 1600);
+        } else {
+          sessionStorage.setItem("otp_code", fullCode);
+          setSuccess("Code verified! Please set your new password.");
+          setTimeout(() => { setView("reset"); setSuccess(""); }, 1200);
+        }
       } else {
         setError(data.message || "Invalid code.");
+        // Clear the boxes so the user retypes cleanly instead of editing stale digits.
+        setCode(["", "", "", "", "", ""]);
+        inputs.current[0]?.focus();
       }
     } catch {
       setError("Cannot connect to server.");
@@ -87,7 +119,11 @@ export default function EmailVerification() {
     if (!canResend || loading) return;
     setLoading(true); setError("");
     try {
-      const res  = await fetch(`${API_URL}/auth/otp/resend`, {
+      const endpoint = isRegistration
+        ? `${API_URL}/auth/patient/register/resend`
+        : `${API_URL}/auth/otp/resend`;
+
+      const res  = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -110,17 +146,20 @@ export default function EmailVerification() {
 
   // -- Reset Password ----------------------------------------
   const handleReset = async () => {
+    if (loading) return;
     if (!newPassword) return setError("New password is required.");
     if (!passwordValid(newPassword)) return setError("Password does not meet all requirements.");
     if (!confirmPw) return setError("Please confirm your new password.");
     if (newPassword !== confirmPw) return setError("Passwords do not match.");
+    const resetCode = sessionStorage.getItem("otp_code") || code.join("");
+    if (!/^\d{6}$/.test(resetCode)) return setError("Please verify your email code before resetting your password.");
 
     setLoading(true); setError("");
     try {
       const res  = await fetch(`${API_URL}/auth/password/reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, newPassword }),
+        body: JSON.stringify({ email, code: resetCode, newPassword }),
       });
       const data = await res.json();
 
@@ -128,6 +167,8 @@ export default function EmailVerification() {
 
       setSuccess("Password reset successfully! Redirecting to login...");
       sessionStorage.removeItem("otp_email");
+      sessionStorage.removeItem("otp_flow");
+      sessionStorage.removeItem("otp_code");
       setTimeout(() => navigate("/login"), 2000);
     } catch {
       setError("Cannot connect to server.");
@@ -254,7 +295,7 @@ export default function EmailVerification() {
             <div className="brand-hero">
               <div className="eyebrow">{view === "verify" ? "Email verification" : "Reset password"}</div>
               <h1>{view === "verify" ? "Enter the code sent to your email." : "Create your new secure password."}</h1>
-              <p>QELCare requires a one-time code before resetting your password. Check your inbox and enter the 6-digit code.</p>
+              <p>{isRegistration ? "QELCare requires email verification before your patient account can sign in." : "QELCare requires a one-time code before resetting your password. Check your inbox and enter the 6-digit code."}</p>
               <div className="trust-grid">
                 {[
                   { title:"Secure identity check",   body:"The code confirms access to the registered email address." },
@@ -279,13 +320,13 @@ export default function EmailVerification() {
           {/* Form */}
           <section className="form-pane">
             <div className="form-wrap">
-              <button className="back-link" onClick={() => navigate("/forgot-password")}>{"<- Back"}</button>
+              <button className="back-link" onClick={() => navigate(isRegistration ? "/register" : "/forgot-password")}>{"<- Back"}</button>
 
               {/* -- VERIFY VIEW -- */}
               {view === "verify" && (
                 <>
                   <div className="auth-head">
-                    <h2>Verify your email</h2>
+                    <h2>{isRegistration ? "Verify account" : "Verify your email"}</h2>
                     <p>Enter the 6-digit code sent to <span className="email-display">{email}</span></p>
                   </div>
                   <div className="card">
@@ -304,6 +345,7 @@ export default function EmailVerification() {
                           <input key={i} ref={el => inputs.current[i]=el}
                             type="text" inputMode="numeric" maxLength={1} value={v}
                             onChange={e => handleCodeChange(i, e.target.value)}
+                            onPaste={handleCodePaste}
                             onKeyDown={e => handleCodeKey(i, e)} />
                         ))}
                       </div>
@@ -312,7 +354,7 @@ export default function EmailVerification() {
 
                     <div className="actions">
                       <button className="btn" onClick={handleVerify} disabled={loading || !!success}>
-                        {loading ? "Verifying..." : "Verify Code"}
+                        {loading ? "Verifying..." : isRegistration ? "Verify Account" : "Verify Code"}
                       </button>
                       <button className="btn-ghost" onClick={handleResend} disabled={!canResend || loading}>
                         {loading ? "Sending..." : canResend ? "Resend Code" : `Resend in ${timer}s`}

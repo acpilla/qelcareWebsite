@@ -21,7 +21,7 @@ function ClockIcon()    { return <svg viewBox="0 0 24 24" fill="none" stroke="cu
 const ROLE_REDIRECT = {
   Admin:   "/admin/dashboard",
   Doctor:  "/doctor/dashboard",
-  Nurse:   "/nurse/queue",
+  Nurse:   "/nurse-station",
   Cashier: "/cashier/dashboard",
   Patient: "/dashboard",
   Frontdesk: "/frontdesk/dashboard",
@@ -245,9 +245,28 @@ const styles = `
   .ls-btn-lock { background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%) !important; }
 `;
 
+const inqInputStyle = { width: "100%", boxSizing: "border-box", border: "1.5px solid #e5eaf3", borderRadius: 10, padding: "9px 11px", fontSize: 14, fontFamily: "inherit", color: "#162235", background: "#fafbfd" };
+
+function Inq({ label, value, onChange, type = "text" }) {
+  return (
+    <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800, color: "#42526a" }}>
+      {label}
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} style={inqInputStyle} />
+    </label>
+  );
+}
+
+const EMPTY_INQUIRY = { full_name: "", email: "", phone: "", subject: "", message: "", preferred_date: "" };
+
 export default function LoginScreen() {
   const navigate = useNavigate();
   const usernameRef = useRef(null);
+
+  const [showInquiry, setShowInquiry] = useState(false);
+  const [inq, setInq] = useState(EMPTY_INQUIRY);
+  const [inqBusy, setInqBusy] = useState(false);
+  const [inqMsg, setInqMsg] = useState("");
+  const [inqErr, setInqErr] = useState("");
 
   const [username,     setUsername]     = useState("");
   const [password,     setPassword]     = useState("");
@@ -270,6 +289,7 @@ export default function LoginScreen() {
   const clearFeedback = () => { setError(""); setErrorType("error"); setAttemptsLeft(null); };
 
   const handleLogin = async () => {
+    if (loading) return;
     if (!username.trim()) { setError("Please enter your username."); setErrorType("error"); return; }
     if (!password.trim()) { setError("Please enter your password."); setErrorType("error"); return; }
     if (isLocked) return;
@@ -285,6 +305,19 @@ export default function LoginScreen() {
       const data = await res.json();
 
       if (!res.ok) {
+        // "" Unverified patient account ""
+        if (data.code === "ACCOUNT_UNVERIFIED") {
+          if (data.email) {
+            sessionStorage.setItem("otp_email", String(data.email).toLowerCase());
+            sessionStorage.setItem("otp_flow", "registration");
+            sessionStorage.removeItem("otp_code");
+          }
+          setError(data.message || "Account is not yet verified. Redirecting to email verification.");
+          setErrorType("warn");
+          setLoading(false);
+          if (data.email) setTimeout(() => navigate("/verify-email"), 1100);
+          return;
+        }
         // "" Locked with countdown ""
         if (data.lockout_until) {
           setLockoutUntil(data.lockout_until);
@@ -334,6 +367,28 @@ export default function LoginScreen() {
 
   const handleKey = (e) => { if (e.key === "Enter") handleLogin(); };
   const focusUsername = () => usernameRef.current?.focus();
+
+  const submitInquiry = async () => {
+    setInqErr(""); setInqMsg("");
+    if (!inq.full_name.trim() || !inq.message.trim()) { setInqErr("Please enter your name and a message."); return; }
+    if (!inq.email.trim() && !inq.phone.trim()) { setInqErr("Please provide an email or phone so the clinic can reach you."); return; }
+    setInqBusy(true);
+    try {
+      const res = await fetch(`${API_URL}/inquiries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(inq),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to send inquiry.");
+      setInqMsg(data.message || "Your inquiry has been sent.");
+      setInq(EMPTY_INQUIRY);
+    } catch (e) {
+      setInqErr(e.message || "Cannot connect to server.");
+    } finally {
+      setInqBusy(false);
+    }
+  };
 
   // Attempts bar: 5 max before first lock
   const attemptsBarWidth = attemptsLeft != null ? `${((5 - attemptsLeft) / 5) * 100}%` : "0%";
@@ -538,12 +593,63 @@ export default function LoginScreen() {
                 </div>
               </div>
 
+              <button
+                type="button"
+                onClick={() => { setShowInquiry(true); setInqMsg(""); setInqErr(""); }}
+                style={{ marginTop: 10, width: "100%", background: "transparent", border: "1.5px dashed #cddbeb", borderRadius: 12, padding: "11px 12px", color: "#163a6b", fontWeight: 800, fontSize: ".82rem", cursor: "pointer" }}
+              >
+                Book or ask without an account → Send an inquiry
+              </button>
+
               <p className="ls-footnote">Contact your administrator if you need a new staff account.</p>
             </div>
           </section>
 
         </div>
       </div>
+
+      {showInquiry && (
+        <div onClick={() => setShowInquiry(false)} style={{ position: "fixed", inset: 0, background: "rgba(8,18,33,.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 100 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "min(520px, 96vw)", maxHeight: "90vh", overflowY: "auto", background: "#fff", borderRadius: 16, boxShadow: "0 24px 64px rgba(14,35,64,.28)", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e8eef6", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "#0e2340" }}>Send an Inquiry</h3>
+              <button onClick={() => setShowInquiry(false)} aria-label="Close" style={{ border: 0, background: "#eef4fb", color: "#163a6b", width: 34, height: 34, borderRadius: 10, fontSize: 18, fontWeight: 900, cursor: "pointer" }}>×</button>
+            </div>
+            <div style={{ padding: "16px 20px 22px", display: "grid", gap: 12 }}>
+              <p style={{ margin: 0, color: "#5a6a7e", fontSize: 13.5, lineHeight: 1.55 }}>No account needed. Send your question or a booking request and the clinic front desk will contact you.</p>
+              {inqErr && <div style={{ padding: "10px 12px", borderRadius: 8, background: "#fef2f2", color: "#b91c1c", fontWeight: 700, fontSize: 13 }}>{inqErr}</div>}
+              {inqMsg ? (
+                <>
+                  <div style={{ padding: "10px 12px", borderRadius: 8, background: "#edf8f1", color: "#0f6b3c", fontWeight: 700, fontSize: 13 }}>{inqMsg}</div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button onClick={() => setShowInquiry(false)} style={{ border: 0, background: "#163a6b", color: "#fff", borderRadius: 10, padding: "10px 18px", fontWeight: 800, cursor: "pointer" }}>Done</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Inq label="Full name *" value={inq.full_name} onChange={v => setInq(s => ({ ...s, full_name: v }))} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <Inq label="Email" type="email" value={inq.email} onChange={v => setInq(s => ({ ...s, email: v }))} />
+                    <Inq label="Phone" value={inq.phone} onChange={v => setInq(s => ({ ...s, phone: v }))} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 10 }}>
+                    <Inq label="Subject" value={inq.subject} onChange={v => setInq(s => ({ ...s, subject: v }))} />
+                    <Inq label="Preferred date" type="date" value={inq.preferred_date} onChange={v => setInq(s => ({ ...s, preferred_date: v }))} />
+                  </div>
+                  <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800, color: "#42526a" }}>
+                    Message *
+                    <textarea value={inq.message} onChange={e => setInq(s => ({ ...s, message: e.target.value }))} rows={4} style={inqInputStyle} placeholder="How can the clinic help you?" />
+                  </label>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                    <button onClick={() => setShowInquiry(false)} style={{ border: "1px solid #cddbeb", background: "#fff", color: "#163a6b", borderRadius: 10, padding: "10px 16px", fontWeight: 800, cursor: "pointer" }}>Close</button>
+                    <button onClick={submitInquiry} disabled={inqBusy} style={{ border: 0, background: "#163a6b", color: "#fff", borderRadius: 10, padding: "10px 18px", fontWeight: 800, cursor: "pointer", opacity: inqBusy ? .6 : 1 }}>{inqBusy ? "Sending..." : "Send Inquiry"}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

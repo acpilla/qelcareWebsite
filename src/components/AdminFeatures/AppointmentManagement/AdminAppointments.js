@@ -1,19 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
+import { C } from "../../../utils/adminTheme";
 
-const C = {
-  navy: "#0f2744",
-  blue: "#163a6b",
-  teal: "#1f7a6f",
-  amber: "#8a5a12",
-  purple: "#5a3a8a",
-  red: "#b63342",
-  muted: "#8a97a8",
-  text: "#5a6a7e",
-  border: "#e8eef6",
-  soft: "#f8fafd",
-};
+const EXPORT_COLUMNS = [
+  { header: "Reference", value: (appt) => `APT-${String(appt.id).padStart(5, "0")}` },
+  { header: "Patient", value: (appt) => appt.patient_name || "" },
+  { header: "Phone", value: (appt) => appt.patient_phone || "" },
+  { header: "Doctor", value: (appt) => appt.doctor_name || "" },
+  { header: "Specialty", value: (appt) => appt.specialty_name || "" },
+  { header: "Date", value: (appt) => formatDate(appt.date) },
+  { header: "Time", value: (appt) => formatTime(appt.time) },
+  { header: "Status", value: (appt) => STATUS_META[appt.status]?.label || appt.status || "" },
+  { header: "Type", value: (appt) => appt.type || "" },
+  { header: "Chief Complaint", value: (appt) => appt.chief_complaint || appt.notes || "" },
+];
 
 const STATUS_OPTIONS = ["PENDING", "CONFIRMED", "IN_QUEUE", "COMPLETED", "CANCELLED", "RESCHEDULED", "NO_SHOW"];
 const TYPE_OPTIONS = [
@@ -282,6 +284,13 @@ function AppointmentRow({ appointment, onStatus, onReschedule }) {
   const actions = TRANSITIONS[appointment.status] || [];
   const terminal = actions.length === 0;
   const isToday = appointment.date === todayInput();
+  // Prefer the backend-computed flag; fall back to a local date+time check.
+  const isPast =
+    appointment.is_past === true ||
+    (appointment.date && appointment.date < todayInput());
+  const nonTerminal = !["COMPLETED", "CANCELLED", "NO_SHOW"].includes(appointment.status);
+  // A past appointment that was never resolved needs settling.
+  const needsSettle = isPast && nonTerminal && appointment.status !== "IN_QUEUE";
 
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -309,13 +318,24 @@ function AppointmentRow({ appointment, onStatus, onReschedule }) {
       </td>
       <td style={{ ...tdStyle, textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {actions.includes("CONFIRMED") && <Button onClick={() => onStatus(appointment, "CONFIRMED")}>{isToday ? "Approve and Queue" : "Approve"}</Button>}
-          {actions.includes("IN_QUEUE") && isToday && <Button onClick={() => onStatus(appointment, "IN_QUEUE")}>Check In</Button>}
-          {actions.includes("NO_SHOW") && isToday && <Button onClick={() => onStatus(appointment, "NO_SHOW")}>No Show</Button>}
-          {["PENDING", "CONFIRMED", "RESCHEDULED"].includes(appointment.status) && <Button onClick={() => onReschedule(appointment)}>Reschedule</Button>}
-          {actions.includes("CANCELLED") && <Button variant="danger" onClick={() => onStatus(appointment, "CANCELLED")}>Cancel</Button>}
-          {appointment.status === "CONFIRMED" && !isToday && <span style={{ color: C.muted, fontSize: 12, alignSelf: "center" }}>Waiting date</span>}
-          {terminal && <span style={{ color: C.muted, fontSize: 12 }}>No actions</span>}
+          {needsSettle ? (
+            <>
+              <span style={{ color: C.amber, fontSize: 12, fontWeight: 800, alignSelf: "center" }}>Past — settle:</span>
+              <Button onClick={() => onStatus(appointment, "NO_SHOW")}>No Show</Button>
+              <Button variant="danger" onClick={() => onStatus(appointment, "CANCELLED")}>Cancel</Button>
+            </>
+          ) : (
+            <>
+              {!isPast && actions.includes("CONFIRMED") && <Button onClick={() => onStatus(appointment, "CONFIRMED")}>{isToday ? "Approve and Queue" : "Approve"}</Button>}
+              {!isPast && actions.includes("IN_QUEUE") && isToday && <Button onClick={() => onStatus(appointment, "IN_QUEUE")}>Check In</Button>}
+              {!isPast && actions.includes("NO_SHOW") && isToday && <Button onClick={() => onStatus(appointment, "NO_SHOW")}>No Show</Button>}
+              {!isPast && ["PENDING", "CONFIRMED", "RESCHEDULED"].includes(appointment.status) && <Button onClick={() => onReschedule(appointment)}>Reschedule</Button>}
+              {!isPast && actions.includes("CANCELLED") && <Button variant="danger" onClick={() => onStatus(appointment, "CANCELLED")}>Cancel</Button>}
+              {!isPast && appointment.status === "CONFIRMED" && !isToday && <span style={{ color: C.muted, fontSize: 12, alignSelf: "center" }}>Waiting date</span>}
+              {appointment.status === "IN_QUEUE" && isPast && <span style={{ color: C.muted, fontSize: 12, alignSelf: "center" }}>In consultation workflow</span>}
+              {terminal && <span style={{ color: C.muted, fontSize: 12 }}>No actions</span>}
+            </>
+          )}
         </div>
       </td>
     </tr>
@@ -499,6 +519,15 @@ export default function AdminAppointments() {
           <div style={{ color: C.text, fontSize: 13 }}>Book, approve, reschedule, cancel, and mark no-shows. Same-day approvals enter the live queue.</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          <ExportMenu
+            filename="qelcare-appointments"
+            title="QELCare Appointments"
+            subtitle={`${visibleAppointments.length} appointment${visibleAppointments.length === 1 ? "" : "s"} matching the current filters`}
+            sheetTitle="Appointments"
+            columns={EXPORT_COLUMNS}
+            rows={visibleAppointments}
+            disabled={loading}
+          />
           <Button onClick={loadAppointments} disabled={loading}>Refresh</Button>
           <Button variant="primary" onClick={() => setModal({ mode: "create", appointment: null })}>Add Appointment</Button>
         </div>

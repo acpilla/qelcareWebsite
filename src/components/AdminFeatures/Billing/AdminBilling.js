@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
 
 const pesoFormatter = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -88,6 +89,15 @@ function sameDay(date, target) {
 function sameMonth(date, target) {
   return date && date.getFullYear() === target.getFullYear() && date.getMonth() === target.getMonth();
 }
+
+const EXPORT_COLUMNS = [
+  { header: "OR / Reference", value: (txn) => txn.reference || "" },
+  { header: "Amount Paid", value: (txn) => formatCurrency(txn.amount) },
+  { header: "Payment Source", value: (txn) => txn.paymentSource || "" },
+  { header: "Method", value: (txn) => getPaymentMethodLabel(txn.paymentMethod) },
+  { header: "Date Paid", value: (txn) => formatPaidAt(txn.paidAt) },
+  { header: "Status", value: (txn) => (txn.status || "unknown").replace(/\b\w/g, (char) => char.toUpperCase()) },
+];
 
 function AdminBilling() {
   const [transactions, setTransactions] = useState([]);
@@ -237,9 +247,20 @@ function AdminBilling() {
             <h2>Billing Transactions</h2>
             <p>Paid amounts by date and payment source.</p>
           </div>
-          <button type="button" className="refresh-button" onClick={fetchBilling} disabled={loading}>
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <ExportMenu
+              filename="qelcare-billing"
+              title="QELCare Billing Transactions"
+              subtitle={`${visibleTransactions.length} transaction${visibleTransactions.length === 1 ? "" : "s"} matching the current filters`}
+              sheetTitle="Billing"
+              columns={EXPORT_COLUMNS}
+              rows={visibleTransactions}
+              disabled={loading}
+            />
+            <button type="button" className="refresh-button" onClick={fetchBilling} disabled={loading}>
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         {error && <div className="billing-alert">{error}</div>}
@@ -368,7 +389,7 @@ function AdminBilling() {
         .billing-header h2,
         .table-heading h3 {
           margin: 0;
-          color: #1f2937;
+          color: #0f2744;
           font-size: 24px;
           line-height: 1.2;
         }
@@ -376,15 +397,15 @@ function AdminBilling() {
         .billing-header p,
         .table-heading p {
           margin: 6px 0 0;
-          color: #6b7280;
+          color: #5a6a7e;
           font-size: 14px;
         }
 
         .refresh-button,
         .secondary-button {
-          border: 1px solid #d1d5db;
+          border: 1px solid #d8e2ee;
           background: #ffffff;
-          color: #111827;
+          color: #0f2744;
           border-radius: 8px;
           padding: 10px 14px;
           font-weight: 600;
@@ -395,8 +416,8 @@ function AdminBilling() {
 
         .refresh-button:hover,
         .secondary-button:hover {
-          background: #f9fafb;
-          border-color: #9ca3af;
+          background: #f8fafd;
+          border-color: #aebfd3;
         }
 
         .refresh-button:disabled {
@@ -421,7 +442,7 @@ function AdminBilling() {
 
         .billing-summary-card {
           background: #ffffff;
-          border: 1px solid #e5e7eb;
+          border: 1px solid #e4ecf5;
           border-radius: 8px;
           padding: 18px;
           min-width: 0;
@@ -429,14 +450,14 @@ function AdminBilling() {
 
         .billing-summary-card span {
           display: block;
-          color: #6b7280;
+          color: #5a6a7e;
           font-size: 13px;
           font-weight: 600;
           margin-bottom: 8px;
         }
 
         .billing-summary-card strong {
-          color: #111827;
+          color: #0f2744;
           font-size: 24px;
           line-height: 1.15;
           word-break: break-word;
@@ -448,7 +469,7 @@ function AdminBilling() {
           gap: 10px;
           align-items: center;
           background: #ffffff;
-          border: 1px solid #e5e7eb;
+          border: 1px solid #e4ecf5;
           border-radius: 8px;
           padding: 14px;
         }
@@ -456,10 +477,10 @@ function AdminBilling() {
         .billing-filters input,
         .billing-filters select {
           width: 100%;
-          border: 1px solid #d1d5db;
+          border: 1px solid #d8e2ee;
           border-radius: 8px;
           padding: 10px 12px;
-          color: #111827;
+          color: #0f2744;
           background: #ffffff;
           font-size: 14px;
           min-width: 0;
@@ -467,7 +488,7 @@ function AdminBilling() {
 
         .billing-table-card {
           background: #ffffff;
-          border: 1px solid #e5e7eb;
+          border: 1px solid #e4ecf5;
           border-radius: 8px;
           overflow: hidden;
         }
@@ -477,7 +498,7 @@ function AdminBilling() {
           justify-content: space-between;
           align-items: center;
           padding: 18px;
-          border-bottom: 1px solid #e5e7eb;
+          border-bottom: 1px solid #e4ecf5;
         }
 
         .billing-table-wrap {
@@ -494,22 +515,22 @@ function AdminBilling() {
         .billing-table td {
           padding: 14px 18px;
           text-align: left;
-          border-bottom: 1px solid #f3f4f6;
-          color: #374151;
+          border-bottom: 1px solid #eef3fb;
+          color: #475569;
           font-size: 14px;
           vertical-align: middle;
         }
 
         .billing-table th {
-          color: #6b7280;
+          color: #5a6a7e;
           font-size: 12px;
           text-transform: uppercase;
           letter-spacing: 0;
-          background: #f9fafb;
+          background: #f8fafd;
         }
 
         .billing-table tbody tr:hover {
-          background: #f9fafb;
+          background: #f8fafd;
         }
 
         .billing-table tbody tr:last-child td {
@@ -518,7 +539,7 @@ function AdminBilling() {
 
         .empty-cell {
           text-align: center !important;
-          color: #6b7280 !important;
+          color: #5a6a7e !important;
           padding: 34px 18px !important;
         }
 
@@ -549,8 +570,8 @@ function AdminBilling() {
         }
 
         .source-other {
-          background: #f3f4f6;
-          color: #374151;
+          background: #eef3fb;
+          color: #475569;
         }
 
         .status-paid {
@@ -569,8 +590,8 @@ function AdminBilling() {
         }
 
         .status-unknown {
-          background: #f3f4f6;
-          color: #374151;
+          background: #eef3fb;
+          color: #475569;
         }
 
         @media (max-width: 1180px) {

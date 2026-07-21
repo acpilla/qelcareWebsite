@@ -4,6 +4,7 @@ export const STATUS_META = {
   PENDING: { label: "Pending", bg: "#fff7df", color: "#9a6500" },
   CONFIRMED: { label: "Confirmed", bg: "#e7f5ee", color: "#176b45" },
   IN_QUEUE: { label: "In Queue", bg: "#eaf1ff", color: "#1b4d9b" },
+  FOR_BILLING: { label: "For Billing", bg: "#fff4e5", color: "#b45309" },
   COMPLETED: { label: "Completed", bg: "#edf8f1", color: "#0f6b3c" },
   CANCELLED: { label: "Cancelled", bg: "#fff0f0", color: "#ad3131" },
   RESCHEDULED: { label: "Rescheduled", bg: "#f3edff", color: "#6240a0" },

@@ -1,25 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
-
-const COLORS = {
-  ink: "#0f2744",
-  text: "#26384f",
-  muted: "#7a8797",
-  border: "#dfe8f3",
-  panel: "#ffffff",
-  bg: "#f4f7fb",
-  blue: "#1f5f99",
-  blueSoft: "#eaf3fb",
-  green: "#1f7a4f",
-  greenSoft: "#eaf7f0",
-  amber: "#a66a00",
-  amberSoft: "#fff4dc",
-  red: "#b83a3a",
-  redSoft: "#fdecec",
-  gray: "#64748b",
-  graySoft: "#f1f5f9",
-};
+import { C as COLORS } from "../../../utils/adminTheme";
 
 const STATUS_META = {
   WAITING: {

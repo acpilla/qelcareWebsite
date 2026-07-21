@@ -69,7 +69,7 @@ export default function CashierBilling() {
 
   const payable = useMemo(() => {
     return appointments
-      .filter((item) => item.status === "COMPLETED")
+      .filter((item) => item.status === "FOR_BILLING")
       .filter((item) => !paidAppointmentIds.has(Number(item.id)))
       .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`));
   }, [appointments, paidAppointmentIds]);

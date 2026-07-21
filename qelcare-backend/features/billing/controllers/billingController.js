@@ -33,10 +33,10 @@ const billingController = {
       if (Number(appointment.patient_id) !== Number(patient_id)) {
         return res.status(400).json({ success: false, message: "Patient does not match this appointment." });
       }
-      if (appointment.status !== "COMPLETED") {
+      if (appointment.status !== "FOR_BILLING") {
         return res.status(400).json({
           success: false,
-          message: "Only completed consultations can be billed. The doctor must complete the visit first.",
+          message: "This visit is not ready for billing. The doctor must finish the consultation first (it should be marked For Billing).",
         });
       }
 
@@ -44,6 +44,9 @@ const billingController = {
         ...req.body,
         cashier_id: req.user.user_id,
       });
+
+      // Payment recorded -> the visit is now fully completed.
+      await Appointment.completeFromBilling(appointment_id);
 
       await logger.log({
         userId: req.user.user_id,

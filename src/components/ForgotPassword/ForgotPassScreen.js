@@ -185,8 +185,10 @@ export default function ForgotPasswordScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        setSuccess("Verification code sent! Redirecting…");
-        sessionStorage.setItem("otp_email", email.trim());
+        setSuccess("Verification code sent! Redirecting...");
+        sessionStorage.setItem("otp_email", email.trim().toLowerCase());
+        sessionStorage.setItem("otp_flow", "password_reset");
+        sessionStorage.removeItem("otp_code");
         setTimeout(() => navigate("/verify-email"), 1500);
       } else {
         setError(data.message || "Failed to send verification code.");
@@ -216,7 +218,7 @@ export default function ForgotPasswordScreen() {
             <div className="fp-brand-body">
               <div className="fp-eyebrow"><span className="fp-eyebrow-dot" />Credential Recovery</div>
               <h1>Reset access to your<br /><em>clinic portal account.</em></h1>
-              <p className="fp-brand-desc">Request a secure OTP code to recover access. Works for all roles — Admin, Doctor, Nurse, Cashier, and Patient.</p>
+              <p className="fp-brand-desc">Request a secure OTP code to recover access. Works for all roles â€” Admin, Doctor, Nurse, Cashier, and Patient.</p>
               <div className="fp-steps">
                 {STEPS.map(s => (
                   <div className="fp-step" key={s.n}>
@@ -263,7 +265,7 @@ export default function ForgotPasswordScreen() {
                 </div>
 
                 <button className="fp-btn" type="submit" disabled={loading || !!success}>
-                  {loading ? "Sending…" : success ? "Code Sent!" : "Send Verification Code"}
+                  {loading ? "Sending..." : success ? "Code Sent!" : "Send Verification Code"}
                 </button>
               </form>
 

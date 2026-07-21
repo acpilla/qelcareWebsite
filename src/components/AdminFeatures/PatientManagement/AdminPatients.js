@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
+import { C } from "../../../utils/adminTheme";
 
-const C = {
-  navy: "#0f2744",
-  blue: "#163a6b",
-  teal: "#1f7a6f",
-  amber: "#8a5a12",
-  danger: "#b63342",
-  muted: "#8a97a8",
-  text: "#5a6a7e",
-  border: "#e8eef6",
-  soft: "#f8fafd",
-};
+const EXPORT_COLUMNS = [
+  { header: "Patient ID", value: (patient) => `#${patient.id}` },
+  { header: "Name", value: (patient) => getPatientName(patient) },
+  { header: "Gender", value: (patient) => patient.gender || "" },
+  { header: "Age", value: (patient) => { const age = calculateAge(patient); return age !== null ? `${age}` : ""; } },
+  { header: "Date of Birth", value: (patient) => formatDate(patient.date_of_birth) },
+  { header: "Phone", value: (patient) => patient.phone || "" },
+  { header: "Email", value: (patient) => patient.email || "" },
+  { header: "Emergency Contact", value: (patient) => patient.emergency_contact_name || "" },
+  { header: "Emergency Phone", value: (patient) => patient.emergency_contact_phone || "" },
+  { header: "Status", value: (patient) => (patient.is_active ? "Active" : "Inactive") },
+  { header: "Profile", value: (patient) => (isIncomplete(patient) ? "Incomplete" : "Complete") },
+];
 
 const BLOOD_TYPES = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const GENDERS = ["", "Male", "Female", "Other"];
@@ -524,6 +528,15 @@ export default function AdminPatients() {
           <div style={{ color: C.text, fontSize: 13 }}>Manage clinical patient records separately from login accounts.</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          <ExportMenu
+            filename="qelcare-patients"
+            title="QELCare Patient Records"
+            subtitle={`${filtered.length} patient${filtered.length === 1 ? "" : "s"} matching the current filters`}
+            sheetTitle="Patients"
+            columns={EXPORT_COLUMNS}
+            rows={filtered}
+            disabled={loading}
+          />
           <Button onClick={() => loadPatients(search)} disabled={loading}>Refresh</Button>
           <Button variant="primary" onClick={() => setModal({ mode: "create", patient: null })}>Add Patient</Button>
         </div>

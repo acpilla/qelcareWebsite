@@ -2,6 +2,7 @@
 import React, { useState } from "react";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import "./adminPolish.css";
 
 /**
  * MainLayout — wraps every protected page.

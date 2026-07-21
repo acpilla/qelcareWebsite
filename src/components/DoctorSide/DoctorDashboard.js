@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { authFetch } from "../../utils/auth";
 import MainLayout from "../Layout/MainLayout";
 import MedicalRecords from "../UserSide/MedicalRecords";
@@ -200,6 +200,12 @@ export default function DoctorDashboard() {
   const canStart = selectedQueueStatus === "WAITING" || selectedQueueStatus === "CALLED";
   const canComplete = selectedQueueStatus === "IN_PROGRESS";
 
+  const callEmergency = () => {
+    if (window.confirm("Call the national emergency hotline (911)?\n\nUse this only for a real medical emergency.")) {
+      window.location.href = "tel:911";
+    }
+  };
+
   return (
     <MainLayout pageTitle="Doctor Dashboard" pageSubtitle="Assigned live queue, vitals, history, and consultation records">
       <div style={{ display: "grid", gap: 14 }}>
@@ -217,7 +223,10 @@ export default function DoctorDashboard() {
                 <div style={{ fontWeight: 900, color: "#162235" }}>Today's Consultation Queue</div>
                 <div style={{ color: "#6b778c", fontSize: 12 }}>{formatDate(todayISO())}</div>
               </div>
-              <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+              <div style={{ display: "flex", gap: 8 }}>
+                <ActionButton tone="danger" onClick={callEmergency}>Emergency 911</ActionButton>
+                <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+              </div>
             </div>
 
             {loading ? (

@@ -92,16 +92,16 @@ function buildPrintableReport(records, metrics, diagnosisRows) {
   <title>QELCare Medical Records Report</title>
   <style>
     body { font-family: Arial, sans-serif; color: #172033; margin: 36px; }
-    h1 { color: #123b6d; margin: 0 0 6px; }
-    h2 { color: #123b6d; margin-top: 28px; }
+    h1 { color: #0f2744; margin: 0 0 6px; }
+    h2 { color: #0f2744; margin-top: 28px; }
     .muted { color: #607083; }
     .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0; }
-    .card { border: 1px solid #d9e2ec; border-left: 5px solid #123b6d; padding: 14px; border-radius: 6px; }
+    .card { border: 1px solid #d9e2ec; border-left: 5px solid #0f2744; padding: 14px; border-radius: 6px; }
     .label { color: #607083; font-size: 12px; text-transform: uppercase; }
     .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { border: 1px solid #d9e2ec; padding: 8px; text-align: left; vertical-align: top; }
-    th { background: #eef4fb; color: #123b6d; }
+    th { background: #eef4fb; color: #0f2744; }
     @media print { button { display: none; } body { margin: 20mm; } }
   </style>
 </head>
@@ -335,7 +335,7 @@ const styles = {
     fontFamily: "Arial, Helvetica, sans-serif",
   },
   topbar: {
-    background: "#123b6d",
+    background: "#0f2744",
     color: "#ffffff",
     padding: "18px 24px",
     display: "flex",
@@ -368,7 +368,7 @@ const styles = {
   },
   toolbar: {
     background: "#ffffff",
-    border: "1px solid #d9e4ef",
+    border: "1px solid #e4ecf5",
     borderRadius: 8,
     padding: 16,
     display: "flex",
@@ -400,7 +400,7 @@ const styles = {
   },
   primaryButton: {
     border: "none",
-    background: "#123b6d",
+    background: "#0f2744",
     color: "#ffffff",
     borderRadius: 6,
     padding: "11px 14px",
@@ -410,7 +410,7 @@ const styles = {
   secondaryButton: {
     border: "1px solid #b9c7d6",
     background: "#ffffff",
-    color: "#123b6d",
+    color: "#0f2744",
     borderRadius: 6,
     padding: "10px 14px",
     fontWeight: 700,
@@ -432,8 +432,8 @@ const styles = {
   },
   metricCard: {
     background: "#ffffff",
-    border: "1px solid #d9e4ef",
-    borderLeft: "5px solid #123b6d",
+    border: "1px solid #e4ecf5",
+    borderLeft: "5px solid #0f2744",
     borderRadius: 8,
     padding: 16,
   },
@@ -461,14 +461,14 @@ const styles = {
   },
   panel: {
     background: "#ffffff",
-    border: "1px solid #d9e4ef",
+    border: "1px solid #e4ecf5",
     borderRadius: 8,
     padding: 18,
     marginBottom: 16,
   },
   panelTitle: {
     margin: "0 0 12px",
-    color: "#123b6d",
+    color: "#0f2744",
     fontSize: 20,
   },
   empty: {
@@ -496,7 +496,7 @@ const styles = {
   },
   barFill: {
     height: "100%",
-    background: "#123b6d",
+    background: "#0f2744",
     borderRadius: 999,
   },
   barValue: {
@@ -513,10 +513,10 @@ const styles = {
   recommendation: {
     margin: 0,
     background: "#eef6ff",
-    borderLeft: "4px solid #123b6d",
+    borderLeft: "4px solid #0f2744",
     borderRadius: 6,
     padding: "12px 14px",
-    color: "#123b6d",
+    color: "#0f2744",
     fontWeight: 700,
   },
   tableWrap: {
@@ -528,10 +528,10 @@ const styles = {
   },
   th: {
     background: "#eef4fb",
-    color: "#123b6d",
+    color: "#0f2744",
     textAlign: "left",
     padding: 10,
-    borderBottom: "1px solid #d9e4ef",
+    borderBottom: "1px solid #e4ecf5",
     fontSize: 13,
   },
   td: {

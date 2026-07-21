@@ -1,3 +1,4 @@
+const https = require("https");
 const { Readable } = require("stream");
 const cloudinary = require("../../../config/cloudinary");
 const Patient = require("../../patient/models/Patient");
@@ -40,6 +41,108 @@ function uploadToCloudinary(file) {
 
     Readable.from(file.buffer).pipe(upload);
   });
+}
+
+// Calls the Gemini Vision API and returns the full parsed JSON response.
+function callGemini(apiKey, model, base64Image, mimeType, prompt) {
+  return new Promise((resolve, reject) => {
+    const path = `/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const body = JSON.stringify({
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Image } },
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 4096,
+      },
+    });
+
+    const req = https.request(
+      {
+        hostname: "generativelanguage.googleapis.com",
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+        timeout: 60000,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", () => {
+          let parsed;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            return reject(new Error("Gemini returned invalid JSON."));
+          }
+
+          // Gemini returns error details inside the body even on non-200
+          if (parsed.error) {
+            return reject(new Error(`Gemini API error: ${parsed.error.message || JSON.stringify(parsed.error)}`));
+          }
+
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return reject(new Error(`Gemini returned HTTP ${res.statusCode}: ${data}`));
+          }
+
+          resolve(parsed);
+        });
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy(new Error("Gemini request timed out."));
+    });
+
+    req.on("error", reject);
+
+    req.write(body);
+    req.end();
+  });
+}
+
+const EXTRACTION_PROMPT =
+  "You are a medical document assistant. The image may be a lab result, prescription, " +
+  "doctor's note, vital-signs sheet, medical form, OR a radiology/imaging film such as an " +
+  "X-ray, ultrasound, CT scan, MRI, or ECG. " +
+  "Return ONLY a single minified JSON object (no markdown, no code fences) with exactly two keys: " +
+  '"document_type" and "text". ' +
+  '"document_type": a short, SPECIFIC label for what this document or image is. Identify it from the ' +
+  "image itself even when there is little or no text (for a radiology film, name the imaging type and " +
+  'body part). Examples: "Chest X-ray", "X-ray", "Ultrasound", "CT Scan", "MRI", "ECG", ' +
+  '"Complete Blood Count (CBC)", "Urinalysis", "Blood Chemistry", "Prescription", "Laboratory Result", ' +
+  '"Medical Certificate", "Doctor\'s Note". ' +
+  '"text": ALL readable text from the image exactly as it appears, including handwriting, preserving ' +
+  "line breaks, numbers, units, and dates. If there is no readable text, use an empty string. " +
+  "Do not add any commentary outside the JSON object.";
+
+// Gemini may wrap JSON in ``` fences or add stray prose. Pull out the {…} object
+// and parse it; fall back to treating the whole response as plain extracted text.
+function parseOcrResponse(raw) {
+  const cleaned = String(raw || "").replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/i, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try {
+      const obj = JSON.parse(cleaned.slice(start, end + 1));
+      return {
+        document_type: String(obj.document_type || "").trim(),
+        text: String(obj.text || "").trim(),
+      };
+    } catch {
+      /* fall through */
+    }
+  }
+  return { document_type: "", text: String(raw || "").trim() };
 }
 
 const patientResultController = {
@@ -109,6 +212,66 @@ const patientResultController = {
       const status = err.statusCode || 500;
       console.error("Patient results delete error:", err);
       res.status(status).json({ success: false, message: err.message || "Failed to delete medical result." });
+    }
+  },
+
+  // POST /patient-results/ocr
+  // Body: { image: "<base64>", mime_type: "image/jpeg" }
+  // Returns: { success: true, text: "..." }
+  async ocrImage(req, res) {
+    try {
+      const { image, mime_type } = req.body;
+
+      if (!image || typeof image !== "string" || image.trim() === "") {
+        return res.status(400).json({ success: false, message: "No image data provided." });
+      }
+
+      if (image.length > 14 * 1024 * 1024) {
+        return res.status(413).json({ success: false, message: "Image is too large. Max ~10 MB per page." });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({
+          success: false,
+          message: "GEMINI_API_KEY is not set in the server environment.",
+        });
+      }
+
+      const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const mimeType = mime_type || "image/jpeg";
+
+      const geminiResponse = await callGemini(apiKey, model, image, mimeType, EXTRACTION_PROMPT);
+
+      const raw = geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      const { text, document_type } = parseOcrResponse(raw);
+
+      res.json({ success: true, text, document_type });
+    } catch (err) {
+      console.error("OCR error:", err.message);
+
+      if (err.message.includes("API_KEY_INVALID") || err.message.includes("API key not valid")) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid Gemini API key. Check GEMINI_API_KEY in your .env file.",
+        });
+      }
+
+      if (err.message.toLowerCase().includes("timed out")) {
+        return res.status(504).json({
+          success: false,
+          message: "Text extraction timed out. Try again.",
+        });
+      }
+
+      if (err.message.includes("quota") || err.message.includes("RESOURCE_EXHAUSTED")) {
+        return res.status(429).json({
+          success: false,
+          message: "Gemini free tier daily limit reached. Try again tomorrow or upgrade your plan.",
+        });
+      }
+
+      res.status(500).json({ success: false, message: err.message || "Text extraction failed." });
     }
   },
 };

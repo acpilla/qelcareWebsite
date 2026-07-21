@@ -1,6 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { API_URL, authFetch, getToken } from "../../../utils/auth";
+import { ExportMenu } from "../../../utils/exportUtils";
+import { C } from "../../../utils/adminTheme";
+
+const EXPORT_COLUMNS = [
+  { header: "Username", value: (user) => user.username || "" },
+  { header: "Email", value: (user) => user.email || "" },
+  { header: "Full Name", value: (user) => getFullName(user) },
+  { header: "Role", value: (user) => user.role || "Unassigned" },
+  { header: "Specialty", value: (user) => user.specialty_name || "" },
+  { header: "Status", value: (user) => statusLabel(user.status).label },
+  { header: "Phone", value: (user) => user.phone || "" },
+  { header: "Gender", value: (user) => user.gender || "" },
+  { header: "Joined", value: (user) => formatDate(user.created_at, true) },
+  { header: "Last Login", value: (user) => formatDate(user.last_login, true) },
+];
 
 const STATUS_OPTIONS = [
   { value: "verified", label: "Active" },
@@ -8,20 +23,6 @@ const STATUS_OPTIONS = [
   { value: "locked", label: "Locked" },
   { value: "deactivated", label: "Deactivated" },
 ];
-
-const C = {
-  navy: "#0f2744",
-  blue: "#163a6b",
-  blue2: "#1f4e8c",
-  muted: "#8a97a8",
-  text: "#5a6a7e",
-  border: "#e8eef6",
-  soft: "#f8fafd",
-  bg: "#f0f4f9",
-  ok: "#1f8a5b",
-  warn: "#a56a00",
-  danger: "#b63342",
-};
 
 function statusLabel(status) {
   return {
@@ -299,8 +300,17 @@ function UserModal({ user, roles, specialties, mode, onClose, onSave, saving }) 
 
   const handleChange = (event) => {
     const { name, value } = event.target;
+    // Name fields: block invalid characters and auto-capitalize each word live
+    // ("kelly celocia" -> "Kelly Celocia"), matching the backend.
+    let v = value;
+    if (name === "first_name" || name === "last_name" || name === "middle_name") {
+      v = value
+        .replace(/[^A-Za-zÀ-ÿ.'\- ]/g, "")
+        .toLowerCase()
+        .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+    }
     setForm((prev) => {
-      const next = { ...prev, [name]: value };
+      const next = { ...prev, [name]: v };
       if (name === "role_id" && getRoleNameById(roles, value) !== "Doctor") {
         next.specialty_id = "";
       }
@@ -769,6 +779,15 @@ export default function ManageUsers() {
           <div style={{ color: C.text, fontSize: 13 }}>Backend-synced account directory, roles, statuses, and profile photos.</div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          <ExportMenu
+            filename="qelcare-users"
+            title="QELCare User Directory"
+            subtitle={`${filteredUsers.length} user${filteredUsers.length === 1 ? "" : "s"} matching the current filters`}
+            sheetTitle="Users"
+            columns={EXPORT_COLUMNS}
+            rows={filteredUsers}
+            disabled={loading}
+          />
           <Button onClick={loadData} disabled={loading}>Refresh</Button>
           <Button variant="primary" onClick={() => setModal({ mode: "create", user: null })}>Add User</Button>
         </div>

@@ -1,20 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authFetch } from "../../../utils/auth";
-
-const C = {
-  navy: "#163b6b",
-  navyDark: "#102f57",
-  blue: "#2f6fed",
-  teal: "#1f7a52",
-  amber: "#a56a00",
-  red: "#b94949",
-  text: "#17212b",
-  muted: "#66758a",
-  line: "#d8e2ee",
-  soft: "#f4f7fb",
-  white: "#ffffff",
-};
+import { C } from "../../../utils/adminTheme";
 
 function intValue(value) {
   const parsed = Number.parseInt(value, 10);

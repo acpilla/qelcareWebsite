@@ -254,6 +254,35 @@ const HIGHLIGHTS = [
   { title: "Walk-in also supported", desc: "Already visited us? Ask staff to set up your account." },
 ];
 
+// Bump this when the Data Privacy Statement / Terms text below changes, so the
+// stored consent version reflects what the patient actually agreed to.
+const PRIVACY_VERSION = "1.0";
+
+const LEGAL = {
+  privacy: {
+    title: "Data Privacy Statement",
+    intro:
+      "QELCare (KOBE Clinic) values and protects your personal data in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173) of the Philippines.",
+    sections: [
+      ["What we collect", "Your name, date of birth, contact details (email and phone), and the health information you or your doctors provide — appointments, medical records, vitals, and lab result files you choose to upload."],
+      ["How we use it", "To create and secure your account, manage your appointments, store your medical records and results, and send you clinic updates and verification codes."],
+      ["How we protect it", "Passwords and verification codes are encrypted, access is restricted by staff role, and information is transmitted over secured connections."],
+      ["Your rights", "You may access, correct, or request deletion of your personal data, and withdraw consent, by contacting the clinic."],
+      ["Your consent", "By creating an account, you consent to the collection and processing of your personal and health information for the purposes described above."],
+    ],
+  },
+  terms: {
+    title: "Terms of Service",
+    intro: "By creating a QELCare account and using the patient portal, you agree to the following:",
+    sections: [
+      ["Accurate information", "You will provide true and accurate details about yourself and any relative you are authorized to book for."],
+      ["Proper use", "You will use the portal only for your own care, or for a relative you are authorized to assist, and will not attempt to access other users' data."],
+      ["Not a medical service", "Patient tools — including AI text extraction for uploaded papers — are for personal tracking only and do not replace professional medical advice or an official clinic record."],
+      ["Account security", "You are responsible for keeping your login credentials confidential. The clinic may suspend accounts that violate these terms."],
+    ],
+  },
+};
+
 export default function RegisterScreen() {
   const navigate = useNavigate();
   const [step,      setStep]      = useState(1);
@@ -264,10 +293,22 @@ export default function RegisterScreen() {
   const [showPw,    setShowPw]    = useState(false);
   const [showCPw,   setShowCPw]   = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [legalView, setLegalView] = useState(null); // "privacy" | "terms" | null
 
+  // Name fields are normalized live: invalid characters are blocked and each word
+  // is auto-capitalized ("kelly celocia" -> "Kelly Celocia") as the user types,
+  // matching what the backend stores.
+  const NAME_FIELDS = ["first_name", "last_name", "middle_name"];
   const handle = e => {
     const { name, value } = e.target;
-    setForm(p => ({ ...p, [name]: value }));
+    let v = value;
+    if (NAME_FIELDS.includes(name)) {
+      v = value
+        .replace(/[^A-Za-zÀ-ÿ.'\- ]/g, "")
+        .toLowerCase()
+        .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+    }
+    setForm(p => ({ ...p, [name]: v }));
     setError("");
   };
 
@@ -324,18 +365,22 @@ export default function RegisterScreen() {
         email:         form.email.trim().toLowerCase(),
         username:      form.username.trim().toLowerCase(),
         password:      form.password,
-        role_id:       5,
+        privacy_agreed: true,
+        privacy_version: PRIVACY_VERSION,
         ...(form.phone ? { phone: form.phone.trim() } : {}),
       };
-      const res  = await fetch(`${API_URL}/users/register`, {
+      const res  = await fetch(`${API_URL}/auth/patient/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) return setError(data.message || "Registration failed. Please try again.");
-      setSuccess("Account created! Redirecting to sign in...");
-      setTimeout(() => navigate("/login"), 2200);
+      sessionStorage.setItem("otp_email", payload.email);
+      sessionStorage.setItem("otp_flow", "registration");
+      sessionStorage.removeItem("otp_code");
+      setSuccess(data.message || "Account created. Redirecting to email verification...");
+      setTimeout(() => navigate("/verify-email"), 1600);
     } catch {
       setError("Cannot connect to server. Please try again.");
     } finally {
@@ -634,7 +679,7 @@ export default function RegisterScreen() {
                       <button
                         type="button"
                         className="rg-terms-link"
-                        onClick={e => { e.preventDefault(); alert("Terms of Service - coming soon."); }}
+                        onClick={e => { e.preventDefault(); setLegalView("terms"); }}
                       >
                         Terms of Service
                       </button>
@@ -642,9 +687,9 @@ export default function RegisterScreen() {
                       <button
                         type="button"
                         className="rg-terms-link"
-                        onClick={e => { e.preventDefault(); alert("Privacy Policy - coming soon."); }}
+                        onClick={e => { e.preventDefault(); setLegalView("privacy"); }}
                       >
-                        Privacy Policy
+                        Data Privacy Statement
                       </button>
                     </span>
                   </label>
@@ -681,6 +726,48 @@ export default function RegisterScreen() {
 
         </div>
       </div>
+
+      {legalView && (
+        <div
+          onClick={() => setLegalView(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(8,18,33,.5)", display: "grid", placeItems: "center", padding: 16, zIndex: 100 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: "min(560px, 96vw)", maxHeight: "86vh", overflowY: "auto", background: "#fff", borderRadius: 16, boxShadow: "0 24px 64px rgba(14,35,64,.28)" }}
+          >
+            <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e8eef6", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "#0e2340" }}>{LEGAL[legalView].title}</h3>
+              <button
+                type="button"
+                onClick={() => setLegalView(null)}
+                aria-label="Close"
+                style={{ border: 0, background: "#eef4fb", color: "#163a6b", width: 34, height: 34, borderRadius: 10, fontSize: 18, fontWeight: 900, cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: "16px 20px 22px" }}>
+              <p style={{ margin: "0 0 14px", color: "#42526a", fontSize: 14, lineHeight: 1.6 }}>{LEGAL[legalView].intro}</p>
+              {LEGAL[legalView].sections.map(([heading, body]) => (
+                <div key={heading} style={{ marginBottom: 14 }}>
+                  <div style={{ color: "#0e2340", fontWeight: 800, fontSize: 14, marginBottom: 4 }}>{heading}</div>
+                  <div style={{ color: "#5a6a7e", fontSize: 13.5, lineHeight: 1.6 }}>{body}</div>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+                <button
+                  type="button"
+                  onClick={() => { setAgreedToTerms(true); setLegalView(null); setError(""); }}
+                  style={{ border: 0, borderRadius: 10, padding: "10px 16px", background: "#163a6b", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+                >
+                  I Understand &amp; Agree
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

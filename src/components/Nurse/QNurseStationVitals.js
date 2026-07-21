@@ -78,6 +78,12 @@ export default function QNurseStationVitals() {
     };
   }, [activeQueue]);
 
+  const callEmergency = () => {
+    if (window.confirm("Call the national emergency hotline (911)?\n\nUse this only for a real medical emergency.")) {
+      window.location.href = "tel:911";
+    }
+  };
+
   return (
     <MainLayout pageTitle="Nurse Vitals Workbench" pageSubtitle="Today's active queue and vitals entry shortcuts">
       <div style={{ display: "grid", gap: 14 }}>
@@ -100,8 +106,8 @@ export default function QNurseStationVitals() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <ActionButton tone="danger" onClick={callEmergency}>Emergency 911</ActionButton>
               <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
-              <ActionButton onClick={() => navigate("/nurse/queue")}>All Specialty Queues</ActionButton>
             </div>
           </div>
 

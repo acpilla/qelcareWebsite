@@ -5,6 +5,14 @@ const logger = require("../../../shared/utils/activityLogger");
 const VALID_STATUSES = ["verified", "unverified", "locked", "deactivated"];
 const VALID_GENDERS = ["", null, undefined, "Male", "Female", "Other"];
 
+// Capitalize each word so "kelly celocia" is stored as "Kelly Celocia".
+function toTitleCase(value) {
+ return String(value || "")
+ .trim()
+ .toLowerCase()
+ .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
+
 async function roleExists(roleId) {
  const result = await pool.query("SELECT role_id FROM roles WHERE role_id = $1", [roleId]);
  return result.rowCount > 0;
@@ -220,8 +228,8 @@ const createUser = async (req, res) => {
  username,
  email,
  password,
- first_name,
- last_name,
+ first_name: toTitleCase(first_name),
+ last_name: toTitleCase(last_name),
  role_id,
  specialty_id: specialty_id || null,
  phone,

@@ -12,8 +12,35 @@ import {
   formatDate,
   formatTime,
   getRows,
-  todayISO,
 } from "../Workflow/ClinicUi";
+
+const ACTIVE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "RESCHEDULED"];
+
+function manilaNowKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function scheduleKey(item) {
+  const date = String(item.date || "").slice(0, 10);
+  const time = String(item.time || "00:00").slice(0, 5);
+  return `${date}T${time}`;
+}
+
+function isUpcoming(item) {
+  if (item.is_history === true) return false;
+  return ACTIVE_STATUSES.includes(item.status) && scheduleKey(item) > manilaNowKey();
+}
 
 export default function UserScreen() {
   const navigate = useNavigate();
@@ -60,18 +87,15 @@ export default function UserScreen() {
     load();
   }, [load]);
 
-  const nextAppointment = useMemo(() => {
-    return appointments
-      .filter((item) => !["CANCELLED", "COMPLETED", "NO_SHOW"].includes(item.status))
-      .filter((item) => String(item.date || "").slice(0, 10) >= todayISO())
-      .sort((a, b) => `${a.date || ""} ${a.time || ""}`.localeCompare(`${b.date || ""} ${b.time || ""}`))[0];
-  }, [appointments]);
+  const upcomingAppointments = useMemo(
+    () => appointments.filter(isUpcoming).sort((a, b) => scheduleKey(a).localeCompare(scheduleKey(b))),
+    [appointments]
+  );
 
+  const nextAppointment = upcomingAppointments[0];
   const latestRecord = records[0];
   const latestVitals = vitals[0];
   const prescriptions = records.filter((record) => String(record.prescriptions || record.prescription || "").trim()).length;
-  const activeAppointments = appointments.filter((item) => ["PENDING", "CONFIRMED", "IN_QUEUE", "RESCHEDULED"].includes(item.status)).length;
-  const completedAppointments = appointments.filter((item) => item.status === "COMPLETED").length;
 
   const notices = useMemo(() => {
     const rows = [];
@@ -79,7 +103,7 @@ export default function UserScreen() {
     if (nextAppointment?.status === "CONFIRMED") rows.push("Your appointment is confirmed. Please arrive on time for queue processing.");
     if (nextAppointment?.status === "IN_QUEUE") rows.push("You are currently in the clinic queue.");
     if (latestRecord) rows.push("A doctor medical record is available in My Records.");
-    if (prescriptions > 0) rows.push("Prescription details are available in Medications.");
+    if (prescriptions > 0) rows.push("Prescription details are available in Medications & Documents.");
     return rows.slice(0, 4);
   }, [latestRecord, nextAppointment, prescriptions]);
 
@@ -95,7 +119,7 @@ export default function UserScreen() {
             <Panel style={{ padding: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
                 <div>
-                  <div style={{ color: "#6b778c", fontSize: 12, fontWeight: 900 }}>Patient</div>
+                  <div style={{ color: "#6b778c", fontSize: 12, fontWeight: 900, letterSpacing: ".04em", textTransform: "uppercase" }}>Welcome back</div>
                   <div style={{ color: "#162235", fontSize: 24, fontWeight: 900 }}>
                     {patient?.display_name || patient?.name || [patient?.first_name, patient?.last_name].filter(Boolean).join(" ") || "Patient"}
                   </div>
@@ -104,24 +128,17 @@ export default function UserScreen() {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <ActionButton onClick={() => navigate("/patient/appointments/book")}>Book Appointment</ActionButton>
-                  <ActionButton tone="secondary" onClick={() => navigate("/patient/results")}>Medical Results</ActionButton>
+                  <ActionButton onClick={() => navigate("/patient/appointments?tab=book")}>Book Appointment</ActionButton>
+                  <ActionButton tone="secondary" onClick={() => navigate("/patient/appointments")}>Appointments</ActionButton>
                   <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
                 </div>
               </div>
             </Panel>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-              <Metric label="Active Appointments" value={activeAppointments} />
-              <Metric label="Completed Visits" value={completedAppointments} />
-              <Metric label="Medical Records" value={records.length} />
-              <Metric label="Prescriptions" value={prescriptions} />
-            </div>
-
             <Panel style={{ overflow: "hidden" }}>
               <SectionHeader title="Notifications" action="Refresh" onClick={load} />
               {notices.length === 0 ? (
-                <EmptyState title="No notifications" detail="Clinic updates, completed records, and prescriptions will appear here." />
+                <EmptyState title="No dashboard notices" detail="Clinic updates also appear under the bell icon." />
               ) : (
                 <div style={{ display: "grid" }}>
                   {notices.map((notice) => (
@@ -150,6 +167,11 @@ export default function UserScreen() {
                     <div style={{ color: "#42526a", fontSize: 13 }}>
                       {formatDate(nextAppointment.date)} at {formatTime(nextAppointment.time)}
                     </div>
+                    {nextAppointment.booked_for === "other" && (
+                      <div style={{ color: "#6b778c", fontSize: 12, fontWeight: 800 }}>
+                        For {nextAppointment.patient_name} ({nextAppointment.booked_for_relationship || "relative"})
+                      </div>
+                    )}
                     {nextAppointment.chief_complaint && (
                       <div style={{ border: "1px solid #e3ebf5", borderRadius: 8, padding: 10, color: "#162235", fontSize: 13 }}>
                         {nextAppointment.chief_complaint}
@@ -208,15 +230,6 @@ function SectionHeader({ title, action, onClick }) {
       <div style={{ color: "#162235", fontWeight: 900 }}>{title}</div>
       {action && <ActionButton tone="secondary" onClick={onClick}>{action}</ActionButton>}
     </div>
-  );
-}
-
-function Metric({ label, value }) {
-  return (
-    <Panel style={{ padding: 16 }}>
-      <div style={{ color: "#6b778c", fontSize: 12, fontWeight: 900 }}>{label}</div>
-      <div style={{ color: "#162235", fontSize: 28, fontWeight: 900, marginTop: 4 }}>{value}</div>
-    </Panel>
   );
 }
 

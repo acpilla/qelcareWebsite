@@ -2,25 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
-
-// --- Palette ------------------------------------------------------------------
-const C = {
-  navy:    "#0f2744",
-  blue:    "#163a6b",
-  blueL:   "#eef3fb",
-  green:   "#1a6b3a",
-  greenL:  "#edf8f2",
-  amber:   "#6b4916",
-  amberL:  "#faf3e8",
-  purple:  "#4a1a7a",
-  purpleL: "#f4eefb",
-  teal:    "#1f6b4a",
-  tealL:   "#eaf8f2",
-  muted:   "#8a97a8",
-  border:  "#e8eef6",
-  rowHov:  "#f8fafd",
-  bg:      "#f3f6fb",
-};
+import { C } from "../../../utils/adminTheme";
 
 // --- Appointment status config -------------------------------------------------
 const STATUS_CFG = {

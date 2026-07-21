@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import MainLayout from "../../Layout/MainLayout";
 import { authFetch } from "../../../utils/auth";
+import { C } from "../../../utils/adminTheme";
 
 const RANGE_OPTIONS = [
   { value: "past_7_days", label: "Past 7 Days" },
@@ -9,21 +10,6 @@ const RANGE_OPTIONS = [
   { value: "this_month", label: "This Month" },
   { value: "last_month", label: "Last Month" },
 ];
-
-const C = {
-  navy: "#163a6b",
-  navyDark: "#102f57",
-  blue: "#2f6fed",
-  teal: "#1f7a52",
-  amber: "#a56a00",
-  violet: "#5a3a8a",
-  text: "#17212b",
-  muted: "#66758a",
-  line: "#d8e2ee",
-  soft: "#f4f7fb",
-  white: "#ffffff",
-  red: "#b94949",
-};
 
 const REPORT_LINKS = [
   {
