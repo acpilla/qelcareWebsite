@@ -2,7 +2,7 @@
 // FILE: src/utils/auth.js
 // ============================================================
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5001";
+const API_URL = process.env.REACT_APP_API_URL || "https://qelcarereactweb2-production.up.railway.app";
 
 // ── Token helpers ─────────────────────────────────────────────
 export const getToken  = ()        => localStorage.getItem("token");
