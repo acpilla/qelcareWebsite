@@ -24,8 +24,9 @@ export default function EmailVerification() {
   const [confirmPw, setConfirmPw]     = useState("");
   const [showPw, setShowPw]           = useState(false);
   const [showCPw, setShowCPw]         = useState(false);
-  const [timer, setTimer]             = useState(120);
-  const [canResend, setCanResend]     = useState(false);
+  const [timer, setTimer]             = useState(600);  // code validity (10 min) — matches backend OTP_TTL_MINUTES
+  const [resendIn, setResendIn]       = useState(60);   // resend cooldown — matches backend OTP_COOLDOWN_SECONDS
+  const canResend = resendIn <= 0;
   const [error, setError]             = useState("");
   const [success, setSuccess]         = useState("");
   const [loading, setLoading]         = useState(false);
@@ -36,12 +37,17 @@ export default function EmailVerification() {
     if (!email) navigate(isRegistration ? "/register" : "/forgot-password");
   }, [email, isRegistration, navigate]);
 
-  // Countdown timer
+  // Countdown timers: expiry (informational) + resend cooldown (enables Resend).
+  // Both run off one interval; resend unlocks after 60s while the code stays valid
+  // for the full 10 minutes.
   useEffect(() => {
-    if (view !== "verify" || timer <= 0) return;
-    const id = setInterval(() => setTimer(t => { if (t <= 1) { setCanResend(true); return 0; } return t - 1; }), 1000);
+    if (view !== "verify") return;
+    const id = setInterval(() => {
+      setTimer(t => (t <= 1 ? 0 : t - 1));
+      setResendIn(r => (r <= 1 ? 0 : r - 1));
+    }, 1000);
     return () => clearInterval(id);
-  }, [view, timer]);
+  }, [view]);
 
   // -- OTP input handlers ------------------------------------
   const handleCodeChange = (i, val) => {
@@ -131,7 +137,7 @@ export default function EmailVerification() {
       const data = await res.json();
 
       if (data.success) {
-        setTimer(120); setCanResend(false);
+        setTimer(600); setResendIn(60);
         setCode(["","","","","",""]);
         setSuccess("New code sent!"); setTimeout(() => setSuccess(""), 2000);
       } else {
@@ -299,7 +305,7 @@ export default function EmailVerification() {
               <div className="trust-grid">
                 {[
                   { title:"Secure identity check",   body:"The code confirms access to the registered email address." },
-                  { title:"2-minute expiry",          body:"Each code expires after 2 minutes. Request a new one if it expires." },
+                  { title:"10-minute expiry",         body:"Each code expires after 10 minutes. You can request a new one after 60 seconds." },
                   { title:"Password requirements",    body:"At least 8 characters with uppercase, lowercase, number, and special character." },
                 ].map(c => (
                   <div className="trust-card" key={c.title}>
@@ -357,7 +363,7 @@ export default function EmailVerification() {
                         {loading ? "Verifying..." : isRegistration ? "Verify Account" : "Verify Code"}
                       </button>
                       <button className="btn-ghost" onClick={handleResend} disabled={!canResend || loading}>
-                        {loading ? "Sending..." : canResend ? "Resend Code" : `Resend in ${timer}s`}
+                        {loading ? "Sending..." : canResend ? "Resend Code" : `Resend in ${resendIn}s`}
                       </button>
                     </div>
                   </div>

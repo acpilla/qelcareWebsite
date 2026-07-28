@@ -24,7 +24,7 @@ const BREVO_HOST = "api.brevo.com";
 const BREVO_PATH = "/v3/smtp/email";
 const REQUEST_TIMEOUT_MS = 10000;
 
-const OTP_TTL_MINUTES_DEFAULT = 2;
+const OTP_TTL_MINUTES_DEFAULT = 10; // keep in sync with authService OTP_TTL_MINUTES
 
 // ---------------------------------------------------------------------------
 // Configuration helpers

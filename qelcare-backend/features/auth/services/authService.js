@@ -18,7 +18,12 @@ const bcrypt = require("bcrypt");
 const pool = require("../../../config/database");
 const emailNotifier = require("../../../shared/utils/emailNotifier");
 
-const OTP_TTL_MINUTES = 2;
+// OTP validity. Kept generous (10 min) because the code is emailed: transactional
+// delivery (Brevo) + inbox/spam latency can eat a minute or two, and the backend
+// clock starts at OTP creation while the frontend countdown only starts once the
+// verify page loads. 2 minutes was too tight and users hit "expired" after a
+// normal delay. 6-digit, bcrypt-hashed, single-use, 5-attempt-capped -> 10 min is safe.
+const OTP_TTL_MINUTES = 10;
 const OTP_COOLDOWN_SECONDS = 60;
 const OTP_MAX_DAILY_REQUESTS = 10;
 const OTP_MAX_ATTEMPTS = 5;

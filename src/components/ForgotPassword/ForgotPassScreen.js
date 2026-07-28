@@ -173,7 +173,7 @@ const styles = `
 
 const STEPS = [
   { n: "1", title: "Enter your email",     desc: "Provide the email linked to your QELCare account." },
-  { n: "2", title: "Receive OTP code",     desc: "A 6-digit code is sent to your inbox. Valid for 2 minutes." },
+  { n: "2", title: "Receive OTP code",     desc: "A 6-digit code is sent to your inbox. Valid for 10 minutes." },
   { n: "3", title: "Set a new password",   desc: "Verify the code and create a new secure password." },
 ];
 
