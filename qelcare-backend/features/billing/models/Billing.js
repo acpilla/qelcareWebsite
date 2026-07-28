@@ -1,7 +1,13 @@
 const db = require("../../../config/database");
 
-const VALID_PAYMENT_METHODS = ["cash", "gcash", "maya", "card", "philhealth", "hmo"];
-const VALID_DISCOUNT_TYPES = ["none", "senior", "pwd", "philhealth", "hmo", "other"];
+const VALID_PAYMENT_METHODS = ["cash", "gcash", "maya", "card", "bank_transfer", "philhealth", "hmo", "other"];
+const VALID_DISCOUNT_TYPES = ["none", "manual", "senior", "pwd", "philhealth", "hmo", "other"];
+
+function appError(statusCode, message) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
 
 function toMoney(value) {
   const number = Number(value || 0);
@@ -35,12 +41,16 @@ function normalizeDiscountType(type) {
   return VALID_DISCOUNT_TYPES.includes(value) ? value : "none";
 }
 
-async function nextOrNumber() {
-  const result = await db.query("SELECT generate_or_number() AS or_num");
-  return result.rows[0].or_num;
-}
-
 const Billing = {
+  // Atomic payment. In ONE transaction:
+  //   1. lock the appointment row (FOR UPDATE) so concurrent cashiers serialize,
+  //   2. validate it is FOR_BILLING for this patient and not already billed,
+  //   3. generate the OR number (inside the txn -> rolls back with it, so
+  //      official receipt numbers stay gapless on failure),
+  //   4. insert the PAID bill,
+  //   5. flip the appointment FOR_BILLING -> COMPLETED.
+  // The partial unique index uq_billing_appt_paid backstops double-billing at
+  // the DB level even if this code path is bypassed.
   async create({
     appointment_id,
     patient_id,
@@ -54,9 +64,7 @@ const Billing = {
   }) {
     const items = normalizeLineItems(line_items);
     if (!items.length) {
-      const err = new Error("At least one billable item with amount greater than zero is required.");
-      err.statusCode = 400;
-      throw err;
+      throw appError(400, "At least one billable item with amount greater than zero is required.");
     }
 
     const subtotal = toMoney(items.reduce((sum, item) => sum + item.amount, 0));
@@ -66,44 +74,85 @@ const Billing = {
     const tendered = amount_tendered === undefined || amount_tendered === null ? total : toMoney(amount_tendered);
 
     if (tendered < total) {
-      const err = new Error("Amount tendered must be equal to or greater than the total.");
-      err.statusCode = 400;
-      throw err;
+      throw appError(400, "Amount tendered must be equal to or greater than the total.");
     }
 
     const change = toMoney(tendered - total);
-    const orNumber = await nextOrNumber();
+    const client = await db.connect();
 
-    const result = await db.query(
-      `INSERT INTO billing
-       (appointment_id, patient_id, cashier_id, line_items,
-        discount_type, discount_pct, discount_amount,
-        subtotal, total_amount, payment_method, amount_tendered, change_amount,
-        or_number, status, paid_at, notes)
-       VALUES ($1::integer,$2::integer,$3::integer,$4::jsonb,
-        $5::varchar,$6::numeric,$7::numeric,
-        $8::numeric,$9::numeric,$10::varchar,$11::numeric,$12::numeric,
-        $13::varchar,'PAID',NOW(),$14::text)
-       RETURNING *`,
-      [
-        appointment_id,
-        patient_id,
-        cashier_id || null,
-        JSON.stringify(items),
-        normalizeDiscountType(discount_type),
-        discPct,
-        discAmount,
-        subtotal,
-        total,
-        normalizePaymentMethod(payment_method),
-        tendered,
-        change,
-        orNumber,
-        notes || null,
-      ]
-    );
+    try {
+      await client.query("BEGIN");
 
-    return result.rows[0];
+      const apptResult = await client.query(
+        `SELECT id, patient_id, status
+         FROM appointments
+         WHERE id = $1::integer
+         FOR UPDATE`,
+        [appointment_id]
+      );
+
+      const appointment = apptResult.rows[0];
+      if (!appointment) throw appError(404, "Appointment not found.");
+      if (Number(appointment.patient_id) !== Number(patient_id)) {
+        throw appError(400, "Patient does not match this appointment.");
+      }
+      if (appointment.status === "COMPLETED") {
+        throw appError(409, "This appointment has already been billed.");
+      }
+      if (appointment.status !== "FOR_BILLING") {
+        throw appError(400, "This visit is not ready for billing. The doctor must finish the consultation first (it should be marked For Billing).");
+      }
+
+      const orResult = await client.query("SELECT generate_or_number() AS or_num");
+      const orNumber = orResult.rows[0].or_num;
+
+      const insertResult = await client.query(
+        `INSERT INTO billing
+         (appointment_id, patient_id, cashier_id, line_items,
+          discount_type, discount_pct, discount_amount,
+          subtotal, total_amount, payment_method, amount_tendered, change_amount,
+          or_number, status, paid_at, notes)
+         VALUES ($1::integer,$2::integer,$3::integer,$4::jsonb,
+          $5::varchar,$6::numeric,$7::numeric,
+          $8::numeric,$9::numeric,$10::varchar,$11::numeric,$12::numeric,
+          $13::varchar,'PAID',NOW(),$14::text)
+         RETURNING *`,
+        [
+          appointment_id,
+          patient_id,
+          cashier_id || null,
+          JSON.stringify(items),
+          normalizeDiscountType(discount_type),
+          discPct,
+          discAmount,
+          subtotal,
+          total,
+          normalizePaymentMethod(payment_method),
+          tendered,
+          change,
+          orNumber,
+          notes || null,
+        ]
+      );
+
+      await client.query(
+        `UPDATE appointments
+         SET status = 'COMPLETED', updated_at = NOW()
+         WHERE id = $1::integer AND status = 'FOR_BILLING'`,
+        [appointment_id]
+      );
+
+      await client.query("COMMIT");
+      return insertResult.rows[0];
+    } catch (err) {
+      await client.query("ROLLBACK");
+      if (err.code === "23505" && err.constraint === "uq_billing_appt_paid") {
+        throw appError(409, "This appointment has already been billed.");
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
   },
 
   async findAll({ search = "", status, page = 1, limit = 20 } = {}) {
@@ -212,18 +261,25 @@ const Billing = {
     return result.rows[0] || null;
   },
 
-  async void(id, cashier_id) {
+  // Void a PAID bill. The trg_billing_voided trigger returns the appointment
+  // to FOR_BILLING so the cashier can re-bill the visit correctly.
+  async void(id, cashier_id, reason = null) {
+    const cleanReason = String(reason || "").trim() || null;
     const result = await db.query(
       `UPDATE billing
        SET status = 'VOIDED',
            cashier_id = $1::integer,
            voided_by = $1::integer,
            voided_at = NOW(),
+           notes = CASE
+             WHEN $3::text IS NULL THEN notes
+             ELSE COALESCE(notes || E'\n', '') || 'VOID reason: ' || $3::text
+           END,
            updated_at = NOW()
        WHERE id = $2::integer
          AND status = 'PAID'
        RETURNING *`,
-      [cashier_id, id]
+      [cashier_id, id, cleanReason]
     );
 
     return result.rows[0] || null;

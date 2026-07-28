@@ -294,29 +294,29 @@ function AppointmentRow({ appointment, onStatus, onReschedule }) {
 
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-      <td style={tdStyle}>
+      <td data-label="Reference" style={tdStyle}>
         <div style={{ color: C.navy, fontWeight: 900 }}>APT-{String(appointment.id).padStart(5, "0")}</div>
         <div style={{ color: C.muted, fontSize: 12 }}>{appointment.type || "consultation"}</div>
       </td>
-      <td style={tdStyle}>
+      <td data-label="Patient" style={tdStyle}>
         <div style={{ color: C.navy, fontWeight: 900 }}>{appointment.patient_name || "Unknown patient"}</div>
         <div style={{ color: C.muted, fontSize: 12 }}>{appointment.patient_phone || "No phone"}</div>
       </td>
-      <td style={tdStyle}>
+      <td data-label="Doctor" style={tdStyle}>
         <div style={{ color: C.navy, fontWeight: 800 }}>{appointment.doctor_name || "Unknown doctor"}</div>
         <div style={{ color: C.muted, fontSize: 12 }}>{appointment.specialty_name || "No specialty"}</div>
       </td>
-      <td style={tdStyle}>
+      <td data-label="Date/Time" style={tdStyle}>
         <div style={{ color: C.navy, fontWeight: 800 }}>{formatDate(appointment.date)}</div>
         <div style={{ color: C.muted, fontSize: 12 }}>{formatTime(appointment.time)}</div>
       </td>
-      <td style={tdStyle}><Badge status={appointment.status} /></td>
-      <td style={{ ...tdStyle, maxWidth: 220 }}>
+      <td data-label="Status" style={tdStyle}><Badge status={appointment.status} /></td>
+      <td data-label="Reason" className="qc-td-block" style={{ ...tdStyle, maxWidth: 220 }}>
         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {appointment.chief_complaint || appointment.notes || "None"}
         </div>
       </td>
-      <td style={{ ...tdStyle, textAlign: "right" }}>
+      <td data-label="Actions" className="qc-td-block" style={{ ...tdStyle, textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {needsSettle ? (
             <>
@@ -564,7 +564,7 @@ export default function AdminAppointments() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
+          <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
             <thead>
               <tr style={{ background: C.soft }}>
                 <th style={thStyle}>Reference</th>

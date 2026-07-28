@@ -346,7 +346,7 @@ function PatientRow({ patient, onView, onEdit, onToggleActive }) {
 
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-      <td style={tdStyle}>
+      <td data-label="Patient" className="qc-td-block" style={tdStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Avatar patient={patient} />
           <div>
@@ -355,15 +355,15 @@ function PatientRow({ patient, onView, onEdit, onToggleActive }) {
           </div>
         </div>
       </td>
-      <td style={tdStyle}>{patient.gender || "Not set"}</td>
-      <td style={tdStyle}>{age !== null ? `${age} yrs` : "Not set"}</td>
-      <td style={tdStyle}>{patient.phone || "Not set"}</td>
-      <td style={tdStyle}>{patient.emergency_contact_phone || "Not set"}</td>
-      <td style={tdStyle}>
+      <td data-label="Gender" style={tdStyle}>{patient.gender || "Not set"}</td>
+      <td data-label="Age" style={tdStyle}>{age !== null ? `${age} yrs` : "Not set"}</td>
+      <td data-label="Phone" style={tdStyle}>{patient.phone || "Not set"}</td>
+      <td data-label="Emergency" style={tdStyle}>{patient.emergency_contact_phone || "Not set"}</td>
+      <td data-label="Status" style={tdStyle}>
         {patient.is_active ? <Badge color={C.teal} bg="#eaf8f4">Active</Badge> : <Badge color="#666" bg="#f1f1f1">Inactive</Badge>}
       </td>
-      <td style={tdStyle}>{incomplete ? <Badge color={C.amber} bg="#fff4de">Incomplete</Badge> : <Badge color={C.teal} bg="#eaf8f4">Complete</Badge>}</td>
-      <td style={{ ...tdStyle, textAlign: "right" }}>
+      <td data-label="Profile" style={tdStyle}>{incomplete ? <Badge color={C.amber} bg="#fff4de">Incomplete</Badge> : <Badge color={C.teal} bg="#eaf8f4">Complete</Badge>}</td>
+      <td data-label="Actions" className="qc-td-block" style={{ ...tdStyle, textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8 }}>
           <Button onClick={() => onView(patient)}>View</Button>
           <Button onClick={() => onEdit(patient)}>Edit</Button>
@@ -578,7 +578,7 @@ export default function AdminPatients() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+          <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
             <thead>
               <tr style={{ background: C.soft }}>
                 <th style={thStyle}>Patient</th>

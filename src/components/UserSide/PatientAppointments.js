@@ -498,7 +498,7 @@ function AppointmentTable({ title, rows, emptyTitle, emptyDetail, history = fals
         <EmptyState title={emptyTitle} detail={emptyDetail} />
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#f7fafd", color: "#65758b" }}>
                 {["ID", "Patient", "Booked For", "Doctor", "Specialty", "Schedule", "Status", "Details", ...(actions ? ["Actions"] : [])].map((heading) => (
@@ -509,21 +509,21 @@ function AppointmentTable({ title, rows, emptyTitle, emptyDetail, history = fals
             <tbody>
               {rows.map((item) => (
                 <tr key={item.id} style={{ borderTop: "1px solid #eef3f9" }}>
-                  <td style={{ padding: "12px 14px", color: "#6b778c", fontWeight: 800 }}>#{item.id}</td>
-                  <td style={{ padding: "12px 14px" }}>
+                  <td data-label="Ref" style={{ padding: "12px 14px", color: "#6b778c", fontWeight: 800 }}>#{item.id}</td>
+                  <td data-label="Patient" style={{ padding: "12px 14px" }}>
                     <div style={{ fontWeight: 900, color: "#162235" }}>{item.patient_name || "-"}</div>
                     <div style={{ fontSize: 12, color: "#6b778c" }}>{item.patient_phone || item.patient_email || ""}</div>
                   </td>
-                  <td style={{ padding: "12px 14px", color: "#42526a", fontWeight: 800 }}>{bookingTarget(item)}</td>
-                  <td style={{ padding: "12px 14px", fontWeight: 700 }}>{item.doctor_name || "-"}</td>
-                  <td style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
-                  <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>{formatDate(item.date)} at {formatTime(item.time)}</td>
-                  <td style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
-                  <td style={{ padding: "12px 14px", color: "#42526a", minWidth: 180 }}>
+                  <td data-label="Booked For" style={{ padding: "12px 14px", color: "#42526a", fontWeight: 800 }}>{bookingTarget(item)}</td>
+                  <td data-label="Doctor" style={{ padding: "12px 14px", fontWeight: 700 }}>{item.doctor_name || "-"}</td>
+                  <td data-label="Specialty" style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
+                  <td data-label="Schedule" style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>{formatDate(item.date)} at {formatTime(item.time)}</td>
+                  <td data-label="Status" style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
+                  <td data-label="Details" className="qc-td-block" style={{ padding: "12px 14px", color: "#42526a", minWidth: 180 }}>
                     <div style={{ fontSize: 12, lineHeight: 1.45 }}>{item.chief_complaint || item.notes || "-"}</div>
                   </td>
                   {actions && (
-                    <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
+                    <td data-label="Actions" className="qc-td-block" style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
                       <div style={{ display: "flex", gap: 6 }}>
                         {EDITABLE.includes(item.status) && (
                           <ActionButton tone="secondary" disabled={actions.busyId === item.id} onClick={() => actions.onEdit(item)}>Edit</ActionButton>

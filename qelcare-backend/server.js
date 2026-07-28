@@ -41,6 +41,15 @@ const otpLimiter = rateLimit({
   message: { success: false, message: "Too many verification requests. Please wait and try again." },
 });
 
+// Public queue display (waiting-room screens poll it). It is read-only, but it
+// is also unauthenticated — cap the per-IP rate so it can't be hammered.
+const displayLimiter = rateLimit({
+  ...rateLimitOptions,
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { success: false, message: "Too many requests. Please slow down." },
+});
+
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:5173",
@@ -72,6 +81,7 @@ app.use("/auth/login", loginLimiter);
 app.use("/auth/otp", otpLimiter);
 app.use("/auth/password", loginLimiter);
 app.use("/auth/patient", authLimiter);
+app.use("/queue/display", displayLimiter);
 
 app.use("/auth/patient", require("./features/auth/routes/patientRegistrationRoutes"));
 app.use("/auth", require("./features/auth/routes/authRoutes"));

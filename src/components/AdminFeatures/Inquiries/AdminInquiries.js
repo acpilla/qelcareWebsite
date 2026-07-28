@@ -163,7 +163,7 @@ export default function AdminInquiries() {
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#f7fafd", color: MUTED }}>
                   {["ID", "Received", "Name", "Contact", "Subject", "Preferred", "Status", ""].map((h) => (
@@ -174,20 +174,20 @@ export default function AdminInquiries() {
               <tbody>
                 {rows.map((item) => (
                   <tr key={item.inquiry_id} style={{ borderTop: `1px solid ${BORDER}` }}>
-                    <td style={{ padding: "11px 14px", color: MUTED, fontWeight: 800 }}>#{item.inquiry_id}</td>
-                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{new Date(item.created_at).toLocaleDateString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
-                    <td style={{ padding: "11px 14px", fontWeight: 800, color: NAVY }}>{item.full_name}</td>
-                    <td style={{ padding: "11px 14px", color: MUTED }}>
+                    <td data-label="ID" style={{ padding: "11px 14px", color: MUTED, fontWeight: 800 }}>#{item.inquiry_id}</td>
+                    <td data-label="Received" style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{new Date(item.created_at).toLocaleDateString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+                    <td data-label="Name" style={{ padding: "11px 14px", fontWeight: 800, color: NAVY }}>{item.full_name}</td>
+                    <td data-label="Contact" style={{ padding: "11px 14px", color: MUTED }}>
                       <div>{item.email || "-"}</div>
                       <div>{item.phone || ""}</div>
                     </td>
-                    <td style={{ padding: "11px 14px", maxWidth: 240 }}>
+                    <td data-label="Subject" className="qc-td-block" style={{ padding: "11px 14px", maxWidth: 240 }}>
                       <div style={{ fontWeight: 700, color: NAVY }}>{item.subject || "(no subject)"}</div>
                       <div style={{ color: MUTED, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.message}</div>
                     </td>
-                    <td style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{item.preferred_date ? String(item.preferred_date).slice(0, 10) : "-"}</td>
-                    <td style={{ padding: "11px 14px" }}><StatusBadge status={item.status} /></td>
-                    <td style={{ padding: "11px 14px" }}>
+                    <td data-label="Preferred" style={{ padding: "11px 14px", whiteSpace: "nowrap" }}>{item.preferred_date ? String(item.preferred_date).slice(0, 10) : "-"}</td>
+                    <td data-label="Status" style={{ padding: "11px 14px" }}><StatusBadge status={item.status} /></td>
+                    <td data-label="Action" className="qc-td-block" style={{ padding: "11px 14px" }}>
                       <button onClick={() => openInquiry(item)} style={{ border: `1px solid ${NAVY}`, background: "#fff", color: NAVY, borderRadius: 8, padding: "6px 12px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>View</button>
                     </td>
                   </tr>

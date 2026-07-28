@@ -169,25 +169,35 @@ const Appointment = {
     assertNotPastManila(date, time);
     await assertNoDoctorConflict({ doctor_id, date, time });
 
-    const result = await db.query(
-      `INSERT INTO appointments
-        (patient_id, doctor_id, specialty_id, date, time, type, chief_complaint, notes, booked_by, booked_for, booked_for_relationship, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'PENDING')
-       RETURNING id`,
-      [
-        patient_id,
-        doctor_id,
-        specialty_id || null,
-        date,
-        time,
-        normalizeType(type),
-        chief_complaint || null,
-        notes || null,
-        booked_by || null,
-        normalizeBookedFor(booked_for),
-        booked_for_relationship || null,
-      ]
-    );
+    let result;
+    try {
+      result = await db.query(
+        `INSERT INTO appointments
+          (patient_id, doctor_id, specialty_id, date, time, type, chief_complaint, notes, booked_by, booked_for, booked_for_relationship, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'PENDING')
+         RETURNING id`,
+        [
+          patient_id,
+          doctor_id,
+          specialty_id || null,
+          date,
+          time,
+          normalizeType(type),
+          chief_complaint || null,
+          notes || null,
+          booked_by || null,
+          normalizeBookedFor(booked_for),
+          booked_for_relationship || null,
+        ]
+      );
+    } catch (err) {
+      // uq_doctor_datetime is the authoritative guard against two bookings
+      // racing past assertNoDoctorConflict — surface a 409, not a 500.
+      if (err.code === "23505" && err.constraint === "uq_doctor_datetime") {
+        throw { statusCode: 409, message: "Doctor already has an active appointment at this time." };
+      }
+      throw err;
+    }
 
     return this.findById(result.rows[0].id);
   },
@@ -382,17 +392,25 @@ const Appointment = {
       ? `${current.notes}\nRescheduled from ${current.date} ${current.time}.`
       : `Rescheduled from ${current.date} ${current.time}.`;
 
-    const result = await db.query(
-      `UPDATE appointments
-       SET date = $1,
-           time = $2,
-           status = 'PENDING',
-           notes = $3,
-           updated_at = NOW()
-       WHERE id = $4
-       RETURNING id`,
-      [date, time, nextNotes, id]
-    );
+    let result;
+    try {
+      result = await db.query(
+        `UPDATE appointments
+         SET date = $1,
+             time = $2,
+             status = 'PENDING',
+             notes = $3,
+             updated_at = NOW()
+         WHERE id = $4
+         RETURNING id`,
+        [date, time, nextNotes, id]
+      );
+    } catch (err) {
+      if (err.code === "23505" && err.constraint === "uq_doctor_datetime") {
+        throw { statusCode: 409, message: "Doctor already has an active appointment at this time." };
+      }
+      throw err;
+    }
 
     return this.findById(result.rows[0].id);
   },
@@ -480,18 +498,8 @@ const Appointment = {
     return { settled: result.rowCount, ids: result.rows.map((r) => r.id) };
   },
 
-  // Move a paid visit from FOR_BILLING to COMPLETED (called after the cashier
-  // records payment).
-  async completeFromBilling(id) {
-    const result = await db.query(
-      `UPDATE appointments
-          SET status = 'COMPLETED', updated_at = NOW()
-        WHERE id = $1 AND status = 'FOR_BILLING'
-        RETURNING id`,
-      [id]
-    );
-    return result.rows[0] || null;
-  },
+  // NOTE: the FOR_BILLING -> COMPLETED flip now happens inside Billing.create's
+  // transaction (features/billing/models/Billing.js), atomically with payment.
 };
 
 Appointment.VALID_STATUSES = VALID_STATUSES;

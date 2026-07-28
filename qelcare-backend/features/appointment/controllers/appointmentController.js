@@ -237,6 +237,12 @@ const appointmentController = {
         limit,
       });
 
+      // Data minimization: billing/front-desk staff get billable services
+      // (requested_services) but not the clinical diagnosis.
+      if (role === "Cashier" || role === "Frontdesk") {
+        for (const row of result.data || []) row.latest_diagnosis = null;
+      }
+
       res.json({ success: true, ...result });
     } catch (err) {
       console.error("Get appointments error:", err);
@@ -248,6 +254,9 @@ const appointmentController = {
     try {
       const appointment = await Appointment.findById(req.params.id);
       if (!appointment) return res.status(404).json({ success: false, message: "Appointment not found." });
+      if (["Cashier", "Frontdesk"].includes(req.user?.role)) {
+        appointment.latest_diagnosis = null;
+      }
       res.json({ success: true, data: appointment, appointment });
     } catch (err) {
       console.error("Get appointment error:", err);
@@ -473,6 +482,9 @@ const appointmentController = {
     try {
       const doctorId = req.params.doctorId || req.user.user_id;
       const appointments = await Appointment.getTodayByDoctor(doctorId);
+      if (req.user?.role === "Frontdesk") {
+        for (const row of appointments) row.latest_diagnosis = null;
+      }
       res.json({ success: true, data: appointments, appointments });
     } catch (err) {
       console.error("Get today appointments error:", err);

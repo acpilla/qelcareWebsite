@@ -531,7 +531,7 @@ function ReadOnly({ label, value }) {
 function ListTable({ users, currentUserId, onView, onEdit, onRemove }) {
   return (
     <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
+      <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", minWidth: 780 }}>
         <thead>
           <tr style={{ background: C.soft, color: C.muted, fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>
             <th style={thStyle}>User</th>
@@ -548,7 +548,7 @@ function ListTable({ users, currentUserId, onView, onEdit, onRemove }) {
             const isCurrentUser = Number(user.user_id) === Number(currentUserId);
             return (
               <tr key={user.user_id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={tdStyle}>
+                <td data-label="User" className="qc-td-block" style={tdStyle}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <UserAvatar user={user} size={44} />
                     <div>
@@ -557,11 +557,11 @@ function ListTable({ users, currentUserId, onView, onEdit, onRemove }) {
                     </div>
                   </div>
                 </td>
-                <td style={tdStyle}>{user.role || "Unassigned"}</td>
-                <td style={tdStyle}><Badge bg={st.bg} color={st.color}>{st.label}</Badge></td>
-                <td style={tdStyle}>{user.phone || "Not set"}</td>
-                <td style={tdStyle}>{formatDate(user.last_login, true)}</td>
-                <td style={{ ...tdStyle, textAlign: "right" }}>
+                <td data-label="Role" style={tdStyle}>{user.role || "Unassigned"}</td>
+                <td data-label="Status" style={tdStyle}><Badge bg={st.bg} color={st.color}>{st.label}</Badge></td>
+                <td data-label="Phone" style={tdStyle}>{user.phone || "Not set"}</td>
+                <td data-label="Last Login" style={tdStyle}>{formatDate(user.last_login, true)}</td>
+                <td data-label="Actions" className="qc-td-block" style={{ ...tdStyle, textAlign: "right" }}>
                   <div style={{ display: "inline-flex", gap: 8 }}>
                     <Button onClick={() => onView(user)}>View</Button>
                     <Button onClick={() => onEdit(user)} disabled={isCurrentUser}>Edit</Button>

@@ -320,7 +320,7 @@ function AdminBilling() {
           </div>
 
           <div className="billing-table-wrap">
-            <table className="billing-table">
+            <table className="billing-table qc-rtable">
               <thead>
                 <tr>
                   <th>OR / Reference</th>
@@ -347,18 +347,18 @@ function AdminBilling() {
                 ) : (
                   visibleTransactions.map((transaction) => (
                     <tr key={transaction.billing_id || transaction.id || transaction.reference}>
-                      <td>
+                      <td data-label="OR / Reference">
                         <strong>{transaction.reference}</strong>
                       </td>
-                      <td>{formatCurrency(transaction.amount)}</td>
-                      <td>
+                      <td data-label="Amount Paid">{formatCurrency(transaction.amount)}</td>
+                      <td data-label="Payment Source">
                         <span className={`source-pill source-${transaction.paymentSource.toLowerCase()}`}>
                           {transaction.paymentSource}
                         </span>
                       </td>
-                      <td>{getPaymentMethodLabel(transaction.paymentMethod)}</td>
-                      <td>{formatPaidAt(transaction.paidAt)}</td>
-                      <td>
+                      <td data-label="Method">{getPaymentMethodLabel(transaction.paymentMethod)}</td>
+                      <td data-label="Date Paid">{formatPaidAt(transaction.paidAt)}</td>
+                      <td data-label="Status">
                         <span className={`status-pill status-${transaction.status || "unknown"}`}>
                           {(transaction.status || "unknown").replace(/\b\w/g, (char) => char.toUpperCase())}
                         </span>

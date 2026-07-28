@@ -567,7 +567,7 @@ export default function AdminRecords() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
+          <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1080 }}>
             <thead>
               <tr style={{ background: C.soft }}>
                 <th style={thStyle}>Record</th>
@@ -595,20 +595,20 @@ export default function AdminRecords() {
                   const followUp = record.follow_up_date_text || record.follow_up_date;
                   return (
                     <tr key={recordId(record)} style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <td style={tdStyle}>
+                      <td data-label="Record" style={tdStyle}>
                         <div style={{ color: C.navy, fontWeight: 900 }}>MR-{String(recordId(record)).padStart(5, "0")}</div>
                         <div style={{ color: C.muted, fontSize: 12 }}>{record.is_confidential ? "Confidential" : "Standard"}</div>
                       </td>
-                      <td style={tdStyle}>
+                      <td data-label="Patient" style={tdStyle}>
                         <div style={{ color: C.navy, fontWeight: 900 }}>{record.patient_name || "Unknown patient"}</div>
                         <div style={{ color: C.muted, fontSize: 12 }}>{record.patient_phone || "No phone"}</div>
                       </td>
-                      <td style={tdStyle}>{record.doctor_name || "Not set"}</td>
-                      <td style={tdStyle}>
+                      <td data-label="Doctor" style={tdStyle}>{record.doctor_name || "Not set"}</td>
+                      <td data-label="Visit" style={tdStyle}>
                         <div>{formatDate(record.visit_date)}</div>
                         <div style={{ color: C.muted, fontSize: 12 }}>{record.specialty_name || "No specialty"}</div>
                       </td>
-                      <td style={{ ...tdStyle, maxWidth: 260 }}>
+                      <td data-label="Diagnosis" className="qc-td-block" style={{ ...tdStyle, maxWidth: 260 }}>
                         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 800, color: C.navy }}>
                           {record.diagnosis || "No diagnosis"}
                         </div>
@@ -616,9 +616,9 @@ export default function AdminRecords() {
                           {record.chief_complaint || "No chief complaint"}
                         </div>
                       </td>
-                      <td style={tdStyle}>{record.vital_id ? `Vitals #${record.vital_id}` : "Not linked"}</td>
-                      <td style={tdStyle}>{followUp ? formatDate(followUp) : "None"}</td>
-                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                      <td data-label="Vitals" style={tdStyle}>{record.vital_id ? `Vitals #${record.vital_id}` : "Not linked"}</td>
+                      <td data-label="Follow-up" style={tdStyle}>{followUp ? formatDate(followUp) : "None"}</td>
+                      <td data-label="Actions" className="qc-td-block" style={{ ...tdStyle, textAlign: "right" }}>
                         <div style={{ display: "inline-flex", gap: 8 }}>
                           <Button onClick={() => setModal({ mode: "view", record })}>View</Button>
                         </div>

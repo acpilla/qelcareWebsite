@@ -243,6 +243,26 @@ const styles = `
 
   /* Lockout overlay on button */
   .ls-btn-lock { background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 100%) !important; }
+
+  /* ---- Responsive: tablet & phone ---- */
+  @media (max-width: 900px) {
+    html, body, #root { height: auto; overflow: auto; }
+    .ls-page { height: auto; min-height: 100vh; padding: 0; align-items: stretch; }
+    .ls-shell {
+      grid-template-columns: 1fr; height: auto; max-height: none; min-height: 100vh;
+      max-width: 560px; margin: 0 auto; border-radius: 0; border: none; box-shadow: none;
+    }
+    .ls-brand { padding: 16px 22px; }
+    .ls-brand::before, .ls-brand::after { display: none; }
+    .ls-brand-body, .ls-brand-foot { display: none; }
+    .ls-form-panel { padding: 26px 22px 40px; overflow: visible; align-items: flex-start; }
+    .ls-form-inner { max-width: 460px; margin: 0 auto; }
+  }
+  @media (max-width: 430px) {
+    .ls-form-panel { padding: 22px 16px 36px; }
+    .ls-patient-btns { grid-template-columns: 1fr; }
+    .ls-form-head h2 { font-size: 1.6rem; }
+  }
 `;
 
 const inqInputStyle = { width: "100%", boxSizing: "border-box", border: "1.5px solid #e5eaf3", borderRadius: 10, padding: "9px 11px", fontSize: 14, fontFamily: "inherit", color: "#162235", background: "#fafbfd" };

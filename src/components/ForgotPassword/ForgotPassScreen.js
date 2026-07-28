@@ -154,6 +154,21 @@ const styles = `
   .fp-footnote { margin-top: 16px; text-align: center; color: #9ba8bc; font-size: .78rem; line-height: 1.55; }
   .fp-footnote-link { color: var(--blue); font-weight: 700; border: none; background: none; cursor: pointer; font: inherit; font-size: .78rem; }
   .fp-footnote-link:hover { text-decoration: underline; }
+
+  /* ---- Responsive: tablet & phone ---- */
+  @media (max-width: 900px) {
+    html, body, #root { height: auto; overflow: auto; }
+    .fp-page { height: auto; min-height: 100vh; padding: 0; align-items: stretch; }
+    .fp-shell {
+      grid-template-columns: 1fr; height: auto; max-height: none; min-height: 100vh;
+      max-width: 560px; margin: 0 auto; border-radius: 0; border: none; box-shadow: none;
+    }
+    .fp-brand { padding: 16px 22px; }
+    .fp-brand::before, .fp-brand::after { display: none; }
+    .fp-brand-body, .fp-brand-foot { display: none; }
+    .fp-form-panel { padding: 26px 22px 40px; align-items: flex-start; }
+    .fp-form-inner { max-width: 460px; margin: 0 auto; }
+  }
 `;
 
 const STEPS = [

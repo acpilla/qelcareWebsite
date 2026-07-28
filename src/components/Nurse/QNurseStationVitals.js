@@ -117,7 +117,7 @@ export default function QNurseStationVitals() {
             <EmptyState title="No active queue patients" detail="Same-day approved appointments will appear after frontdesk check-in." />
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f7fafd", color: "#65758b" }}>
                     {["Queue", "Patient", "Schedule", "Doctor", "Specialty", "Status", "Action"].map((heading) => (
@@ -128,16 +128,16 @@ export default function QNurseStationVitals() {
                 <tbody>
                   {activeQueue.map((entry) => (
                     <tr key={entry.queue_id} style={{ borderTop: "1px solid #eef3f9" }}>
-                      <td style={{ padding: "12px 14px", color: "#163a6b", fontSize: 20, fontWeight: 900 }}>#{entry.queue_number}</td>
-                      <td style={{ padding: "12px 14px" }}>
+                      <td data-label="Queue" style={{ padding: "12px 14px", color: "#163a6b", fontSize: 20, fontWeight: 900 }}>#{entry.queue_number}</td>
+                      <td data-label="Patient" className="qc-td-block" style={{ padding: "12px 14px" }}>
                         <div style={{ color: "#162235", fontWeight: 900 }}>{entry.patient_name}</div>
                         <div style={{ color: "#6b778c", fontSize: 12 }}>{entry.chief_complaint || "No complaint entered"}</div>
                       </td>
-                      <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>{formatDate(entry.appointment_date)} {formatTime(entry.appointment_time)}</td>
-                      <td style={{ padding: "12px 14px" }}>{entry.doctor_name || "-"}</td>
-                      <td style={{ padding: "12px 14px" }}>{entry.specialty_name || "-"}</td>
-                      <td style={{ padding: "12px 14px" }}><StatusBadge status={entry.status} /></td>
-                      <td style={{ padding: "12px 14px" }}>
+                      <td data-label="Schedule" style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>{formatDate(entry.appointment_date)} {formatTime(entry.appointment_time)}</td>
+                      <td data-label="Doctor" style={{ padding: "12px 14px" }}>{entry.doctor_name || "-"}</td>
+                      <td data-label="Specialty" style={{ padding: "12px 14px" }}>{entry.specialty_name || "-"}</td>
+                      <td data-label="Status" style={{ padding: "12px 14px" }}><StatusBadge status={entry.status} /></td>
+                      <td data-label="Action" className="qc-td-block" style={{ padding: "12px 14px" }}>
                         <ActionButton onClick={() => navigate(`/nurse/queue/${entry.specialty_slug}`)}>Open Vitals</ActionButton>
                       </td>
                     </tr>

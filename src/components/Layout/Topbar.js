@@ -257,7 +257,7 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
   const topNotification = useMemo(() => notifications.find((item) => !item.is_read), [notifications]);
 
   return (
-    <header style={{
+    <header className="qc-topbar" style={{
       height: 64,
       background: "#fff",
       borderBottom: "1px solid #e8eef6",
@@ -304,6 +304,7 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
         {topNotification && (
           <button
             type="button"
+            className="qc-hide-sm"
             onClick={() => openNotification(topNotification)}
             style={{
               border: "1px solid #d8e5f8",
@@ -453,7 +454,7 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }} ref={dropRef}>
-          <div style={{
+          <div className="qc-hide-sm" style={{
             padding: "5px 12px",
             borderRadius: 99,
             background: "#eef3fb",
@@ -482,7 +483,7 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
             <Avatar name={fullName} size={32} fontSize={12} />
             <div style={{ textAlign: "left" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#0f2744", lineHeight: 1.2 }}>{fullName}</div>
-              <div style={{ fontSize: 11, color: "#8a97a8" }}>{user?.email || ""}</div>
+              <div className="qc-topbar-sub" style={{ fontSize: 11, color: "#8a97a8" }}>{user?.email || ""}</div>
             </div>
             <span style={{ color: "#8a97a8", marginLeft: 2, display: "flex", transform: dropOpen ? "rotate(180deg)" : "none", transition: ".2s" }}>
               <ChevronIcon />

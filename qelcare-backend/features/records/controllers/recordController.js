@@ -18,6 +18,11 @@ async function writeLog(req, payload) {
   }
 }
 
+// Identity handed to the model so confidential records are filtered per-role.
+function viewerOf(req) {
+  return { role: req.user?.role, userId: req.user?.user_id };
+}
+
 function assertDoctorOwnsRecord(req, record) {
   if (req.user?.role !== "Doctor") return;
   const recordDoctorId = Number(record.doctor_id || 0);
@@ -84,6 +89,7 @@ const recordController = {
         date_to: req.query.date_to || null,
         page: req.query.page || 1,
         limit: req.query.limit || 20,
+        viewer: viewerOf(req),
       });
 
       res.json({ success: true, ...result });
@@ -95,7 +101,9 @@ const recordController = {
 
   async getById(req, res) {
     try {
-      const record = await MedicalRecord.findById(req.params.id);
+      // Viewer-filtered: a confidential record a role may not see 404s
+      // (no existence leak).
+      const record = await MedicalRecord.findById(req.params.id, viewerOf(req));
       if (!record) return res.status(404).json({ success: false, message: "Medical record not found." });
       res.json({ success: true, data: record, record });
     } catch (err) {
@@ -106,7 +114,7 @@ const recordController = {
 
   async getByPatient(req, res) {
     try {
-      const records = await MedicalRecord.findByPatient(req.params.patientId);
+      const records = await MedicalRecord.findByPatient(req.params.patientId, viewerOf(req));
       res.json({ success: true, data: records, records });
     } catch (err) {
       console.error("Get patient records error:", err);
@@ -121,7 +129,8 @@ const recordController = {
         return res.status(404).json({ success: false, message: "Patient profile not found." });
       }
 
-      const records = await MedicalRecord.findByPatient(patient.id);
+      // Patients see all of their OWN records, including confidential ones.
+      const records = await MedicalRecord.findByPatient(patient.id, { role: "PatientSelf" });
       res.json({ success: true, data: records, records });
     } catch (err) {
       console.error("Get my records error:", err);

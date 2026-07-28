@@ -32,6 +32,23 @@ function toBool(value) {
   return false;
 }
 
+// Confidentiality policy for records flagged is_confidential:
+//   Admin              -> sees everything
+//   PatientSelf (/me)  -> sees all of their OWN records
+//   Doctor             -> non-confidential + records they authored
+//   Nurse (and others) -> non-confidential only
+// Returns a SQL clause (pushing its params) or null when no filter applies.
+function confidentialityWhere(viewer, params) {
+  if (!viewer || viewer.role === "Admin" || viewer.role === "PatientSelf") return null;
+  if (viewer.role === "Doctor") {
+    params.push(Number(viewer.userId) || 0);
+    return `(COALESCE(mr.is_confidential, false) = false
+             OR COALESCE(mr.doctor_id, a.doctor_id) = $${params.length}
+             OR mr.created_by = $${params.length})`;
+  }
+  return `COALESCE(mr.is_confidential, false) = false`;
+}
+
 function normalizeRecordInput(input = {}) {
   return {
     patient_id: input.patient_id ? Number(input.patient_id) : null,
@@ -187,6 +204,7 @@ const MedicalRecord = {
     date_to = null,
     page = 1,
     limit = 20,
+    viewer = null,
   } = {}) {
     const safePage = Math.max(parseInt(page, 10) || 1, 1);
     const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
@@ -234,6 +252,9 @@ const MedicalRecord = {
       where.push(`mr.visit_date <= $${params.length}`);
     }
 
+    const confidential = confidentialityWhere(viewer, params);
+    if (confidential) where.push(confidential);
+
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const dataParams = [...params, safeLimit, offset];
 
@@ -266,21 +287,25 @@ const MedicalRecord = {
     };
   },
 
-  async findById(recordId) {
+  async findById(recordId, viewer = null) {
+    const params = [recordId];
+    const confidential = confidentialityWhere(viewer, params);
     const result = await db.query(
       `${SELECT_RECORD}
-       WHERE mr.record_id = $1`,
-      [recordId]
+       WHERE mr.record_id = $1${confidential ? ` AND ${confidential}` : ""}`,
+      params
     );
     return result.rows[0] || null;
   },
 
-  async findByPatient(patientId) {
+  async findByPatient(patientId, viewer = null) {
+    const params = [patientId];
+    const confidential = confidentialityWhere(viewer, params);
     const result = await db.query(
       `${SELECT_RECORD}
-       WHERE mr.patient_id = $1
+       WHERE mr.patient_id = $1${confidential ? ` AND ${confidential}` : ""}
        ORDER BY mr.visit_date DESC, mr.created_at DESC, mr.record_id DESC`,
-      [patientId]
+      params
     );
     return result.rows;
   },

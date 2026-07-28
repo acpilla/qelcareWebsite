@@ -246,6 +246,25 @@ const styles = `
   .rg-footnote { margin-top:12px; text-align:center; color:#9ba8bc; font-size:.76rem; line-height:1.55; }
   .rg-footnote-link { color:var(--blue); font-weight:700; border:none; background:none; cursor:pointer; font:inherit; font-size:.76rem; }
   .rg-footnote-link:hover { text-decoration:underline; }
+
+  /* ---- Responsive: tablet & phone ---- */
+  @media (max-width: 900px) {
+    html, body, #root { height: auto; overflow: auto; }
+    .rg-page { height: auto; min-height: 100vh; padding: 0; align-items: stretch; }
+    .rg-shell {
+      grid-template-columns: 1fr; height: auto; max-height: none; min-height: 100vh;
+      max-width: 560px; margin: 0 auto; border-radius: 0; border: none; box-shadow: none;
+    }
+    .rg-brand { padding: 16px 22px; }
+    .rg-brand::before, .rg-brand::after { display: none; }
+    .rg-brand-body, .rg-brand-foot { display: none; }
+    .rg-form-panel { padding: 24px 22px 40px; overflow: visible; align-items: flex-start; }
+    .rg-form-inner { max-width: 460px; margin: 0 auto; }
+  }
+  @media (max-width: 430px) {
+    .rg-form-panel { padding: 20px 16px 36px; }
+    .rg-form-head h2 { font-size: 1.55rem; }
+  }
 `;
 
 const HIGHLIGHTS = [

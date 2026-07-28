@@ -1,5 +1,4 @@
 const Billing = require("../models/Billing");
-const Appointment = require("../../appointment/models/Appointment");
 const logger = require("../../../shared/utils/activityLogger");
 
 function cleanLineItems(items) {
@@ -21,32 +20,13 @@ const billingController = {
     }
 
     try {
-      const existing = await Billing.findByAppointment(appointment_id);
-      if (existing && existing.status === "PAID") {
-        return res.status(409).json({ success: false, message: "This appointment has already been billed." });
-      }
-
-      const appointment = await Appointment.getRawById(appointment_id);
-      if (!appointment) {
-        return res.status(404).json({ success: false, message: "Appointment not found." });
-      }
-      if (Number(appointment.patient_id) !== Number(patient_id)) {
-        return res.status(400).json({ success: false, message: "Patient does not match this appointment." });
-      }
-      if (appointment.status !== "FOR_BILLING") {
-        return res.status(400).json({
-          success: false,
-          message: "This visit is not ready for billing. The doctor must finish the consultation first (it should be marked For Billing).",
-        });
-      }
-
+      // Validation (exists / patient match / FOR_BILLING / not already billed)
+      // and the FOR_BILLING -> COMPLETED flip all happen inside Billing.create's
+      // transaction under a row lock, so two cashiers can never double-bill.
       const billing = await Billing.create({
         ...req.body,
         cashier_id: req.user.user_id,
       });
-
-      // Payment recorded -> the visit is now fully completed.
-      await Appointment.completeFromBilling(appointment_id);
 
       await logger.log({
         userId: req.user.user_id,
@@ -120,7 +100,8 @@ const billingController = {
 
   async voidBill(req, res) {
     try {
-      const bill = await Billing.void(req.params.id, req.user.user_id);
+      const reason = String(req.body?.reason || req.body?.void_reason || "").trim() || null;
+      const bill = await Billing.void(req.params.id, req.user.user_id, reason);
       if (!bill) return res.status(404).json({ success: false, message: "Billing not found or already voided." });
 
       await logger.log({
@@ -133,10 +114,11 @@ const billingController = {
         metadata: {
           appointment_id: bill.appointment_id,
           total: bill.total_amount,
+          reason,
         },
       });
 
-      res.json({ success: true, message: "Billing voided. Appointment returned to completed/unpaid.", data: bill, billing: bill });
+      res.json({ success: true, message: "Billing voided. The visit is back in For Billing and can be re-billed.", data: bill, billing: bill });
     } catch (err) {
       console.error("Billing void error:", err);
       res.status(500).json({ success: false, message: "Failed to void billing." });

@@ -1,0 +1,131 @@
+/* ============================================================
+   FILE: src/responsive.css
+   Global responsive layer — loaded once in index.js.
+   Additive & opt-in: rules only touch elements tagged with a
+   `qc-` class or apply inside a max-width media query, so the
+   desktop experience is unchanged.
+   ============================================================ */
+
+html { -webkit-text-size-adjust: 100%; }
+img { max-width: 100%; height: auto; }
+
+/* ---------- App shell: off-canvas drawer on small screens ---------- */
+.qc-overlay { display: none; }
+
+@media (max-width: 900px) {
+  /* Sidebar slides in over the content instead of taking a column. */
+  .qc-sidebar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    width: 250px !important;
+    transform: translateX(-100%);
+    transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+    z-index: 70 !important; /* must beat the drawer overlay (60) AND the aside's inline z-index:40 */
+  }
+  .qc-sidebar.qc-sidebar--open {
+    transform: translateX(0);
+    box-shadow: 8px 0 40px rgba(10, 20, 40, .35);
+  }
+
+  .qc-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 20, 40, .5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+    z-index: 60;
+  }
+  .qc-overlay.qc-overlay--show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Content goes full width; wide tables scroll inside instead of
+     shoving the whole page sideways. */
+  .qc-main {
+    padding: 16px 14px 32px !important;
+    overflow-x: auto;
+  }
+  .qc-topbar { padding: 0 14px !important; }
+}
+
+/* ---------- Topbar space savers ---------- */
+@media (max-width: 640px) {
+  .qc-hide-sm { display: none !important; }
+}
+@media (max-width: 480px) {
+  .qc-topbar-sub { display: none !important; }
+}
+
+/* ---------- Mobile: collapse fixed multi-column content grids ----------
+   Most module content uses inline `grid-template-columns` with 2–5 fixed
+   tracks (or a fixed-px master + 1fr detail). On phones these crush. This
+   stacks them to a single column inside app content (.qc-main). `!important`
+   is required to win over inline styles. Auto-fit / auto-fill grids are NOT
+   targeted — they already reflow on their own. */
+@media (max-width: 640px) {
+  .qc-main [style*="1fr 1fr"],
+  .qc-main [style*="1fr) minmax"],
+  .qc-main [style*="repeat(2,"],
+  .qc-main [style*="repeat(3,"],
+  .qc-main [style*="repeat(4,"],
+  .qc-main [style*="repeat(5,"],
+  .qc-main [style*="px) 1fr"],
+  .qc-main [style*="px 1fr"],
+  .qc-main [style*="px minmax"],
+  .qc-main [style*="fr) minmax"],   /* master-detail: list + detail/form panel */
+  .qc-main [style*="1fr 280px"],    /* admin create-user: form + side panel */
+  .qc-main [style*="1.6fr 1fr"],    /* admin create-user 2-col row */
+  .qc-main [style*="1fr 160px"],    /* cashier billing form row */
+  .qc-main [style*="1fr 170px"],    /* nurse vitals entry row (input + field + actions) */
+  .qc-main [style*="2fr 120px"] {   /* doctor manual record-entry row (appt / patient ID / date) */
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ---------- Responsive tables: turn wide tables into stacked cards on phones ----------
+   Add class="qc-rtable" to a <table>. Give each <td> a data-label="Column name".
+   On phones the header hides and each row becomes a labeled card. Cells that hold
+   long text or buttons get an extra class="qc-td-block" so they stack full-width. */
+@media (max-width: 640px) {
+  .qc-rtable, .qc-rtable tbody, .qc-rtable tr, .qc-rtable td { display: block; width: auto; min-width: 0 !important; }
+  .qc-rtable thead { display: none; }
+  .qc-rtable tr {
+    border: 1px solid #e3ebf5 !important;
+    border-radius: 12px;
+    margin: 0 12px 12px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .qc-rtable td {
+    border: none !important;
+    padding: 9px 14px !important;
+    display: flex;
+    gap: 14px;
+    justify-content: space-between;
+    align-items: baseline;
+    text-align: right;
+    white-space: normal !important;
+    min-width: 0 !important;
+  }
+  .qc-rtable td + td { border-top: 1px solid #f1f5fa !important; }
+  .qc-rtable td::before {
+    content: attr(data-label);
+    flex: 0 0 38%;
+    text-align: left;
+    color: #8a97a8;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .qc-rtable td.qc-td-block { display: block; text-align: left; }
+  .qc-rtable td.qc-td-block::before { display: block; margin-bottom: 6px; }
+}
+
+/* Horizontal-scroll helper for steppers / chip rows that shouldn't wrap. */
+.qc-hscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }

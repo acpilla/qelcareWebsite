@@ -369,9 +369,10 @@ const Queue = {
     };
   },
 
+  // Read-only by design: the public, unauthenticated display must never write
+  // (no auto-enqueue, no LOCK TABLE). Confirmed appointments enter the queue
+  // when staff confirm them or open the staff queue screens.
   async getPublicDisplay() {
-    await this.autoEnqueueConfirmed(todayISO());
-
     const [specs, queue] = await Promise.all([
       db.query(
         `SELECT specialty_id, specialty_name

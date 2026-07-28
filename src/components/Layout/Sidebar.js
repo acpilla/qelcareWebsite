@@ -78,7 +78,7 @@ const ROLE_LABEL = {
   Patient: "Patient Portal",
 };
 
-export default function Sidebar({ open = true }) {
+export default function Sidebar({ open = true, onNavigate }) {
   const navigate = useNavigate();
   const location = useLocation();
   const role = getUserRole() || "Admin";
@@ -90,7 +90,7 @@ export default function Sidebar({ open = true }) {
   };
 
   return (
-    <aside style={{
+    <aside className={`qc-sidebar${open ? " qc-sidebar--open" : ""}`} style={{
       width: open ? 248 : 68,
       flexShrink: 0,
       background: "linear-gradient(180deg, #0f2744 0%, #163a6b 60%, #1a4580 100%)",
@@ -147,7 +147,7 @@ export default function Sidebar({ open = true }) {
             <button
               key={item.id}
               type="button"
-              onClick={() => navigate(item.path)}
+              onClick={() => { navigate(item.path); onNavigate && onNavigate(); }}
               title={!open ? item.label : undefined}
               style={{
                 display: "flex",

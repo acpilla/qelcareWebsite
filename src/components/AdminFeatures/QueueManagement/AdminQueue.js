@@ -768,7 +768,7 @@ export default function AdminQueue() {
           />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+            <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
               <thead>
                 <tr style={{ background: "#f8fbff" }}>
                   {["Queue", "Patient", "Doctor", "Appointment", "Status", "Timing", "Actions"].map((head) => (
@@ -800,7 +800,7 @@ export default function AdminQueue() {
                       key={entry.queue_id}
                       style={{ borderBottom: `1px solid ${COLORS.border}` }}
                     >
-                      <td style={{ padding: "13px 14px" }}>
+                      <td data-label="Queue" style={{ padding: "13px 14px" }}>
                         <div
                           style={{
                             width: 44,
@@ -817,7 +817,7 @@ export default function AdminQueue() {
                           {entry.queue_number}
                         </div>
                       </td>
-                      <td style={{ padding: "13px 14px" }}>
+                      <td data-label="Patient" className="qc-td-block" style={{ padding: "13px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div
                             style={{
@@ -845,24 +845,24 @@ export default function AdminQueue() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: "13px 14px", color: COLORS.text, fontSize: 13, fontWeight: 800 }}>
+                      <td data-label="Doctor" style={{ padding: "13px 14px", color: COLORS.text, fontSize: 13, fontWeight: 800 }}>
                         {entry.doctor_name || "-"}
                       </td>
-                      <td style={{ padding: "13px 14px", color: COLORS.text, fontSize: 13 }}>
+                      <td data-label="Appointment" style={{ padding: "13px 14px", color: COLORS.text, fontSize: 13 }}>
                         <div style={{ fontWeight: 800 }}>{formatTime(entry.appointment_time)}</div>
                         <div style={{ color: COLORS.muted, fontSize: 12, marginTop: 2 }}>
                           {entry.appointment_type || "consultation"}
                           {entry.chief_complaint ? ` | ${entry.chief_complaint}` : ""}
                         </div>
                       </td>
-                      <td style={{ padding: "13px 14px" }}>
+                      <td data-label="Status" style={{ padding: "13px 14px" }}>
                         <Badge status={entry.status} />
                       </td>
-                      <td style={{ padding: "13px 14px", color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
+                      <td data-label="Timing" style={{ padding: "13px 14px", color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
                         <div>Called: {formatDateTime(entry.called_at)}</div>
                         <div>Done: {formatDateTime(entry.completed_at)}</div>
                       </td>
-                      <td style={{ padding: "13px 14px" }}>
+                      <td data-label="Actions" className="qc-td-block" style={{ padding: "13px 14px" }}>
                         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
                           {entry.status === "WAITING" && (
                             <>

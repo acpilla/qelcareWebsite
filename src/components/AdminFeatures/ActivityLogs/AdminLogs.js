@@ -422,7 +422,7 @@ export default function AdminLogs() {
                 <p>Logs will appear after users create, update, queue, record, bill, or manage clinic data.</p>
               </div>
             ) : (
-              <table className="al-table">
+              <table className="al-table qc-rtable">
                 <thead>
                   <tr>
                     <th>Time</th>
@@ -439,19 +439,19 @@ export default function AdminLogs() {
                     const info = entityMeta(log.entity_type);
                     return (
                       <tr key={log.log_id}>
-                        <td className="al-time">{formatShortDate(log.created_at)}</td>
-                        <td>
+                        <td data-label="Time" className="al-time">{formatShortDate(log.created_at)}</td>
+                        <td data-label="Actor">
                           <div className="al-actor">
                             <span>{actorName(log)}</span>
                             <small>{log.role_name || log.username || "System"}</small>
                           </div>
                         </td>
-                        <td>
+                        <td data-label="Action">
                           <Badge color={COLORS.navy} bg="#eef3fb">
                             {formatAction(log.action)}
                           </Badge>
                         </td>
-                        <td>
+                        <td data-label="Entity">
                           <div className="al-entity">
                             <Badge color={info.color} bg={info.bg}>
                               {info.label}
@@ -459,9 +459,9 @@ export default function AdminLogs() {
                             {log.entity_id && <small>#{log.entity_id}</small>}
                           </div>
                         </td>
-                        <td className="al-description">{log.description || "No description provided."}</td>
-                        <td className="al-ip">{log.ip_address || "Not recorded"}</td>
-                        <td className="al-actions">
+                        <td data-label="Description" className="al-description qc-td-block">{log.description || "No description provided."}</td>
+                        <td data-label="IP Address" className="al-ip">{log.ip_address || "Not recorded"}</td>
+                        <td data-label="Details" className="al-actions qc-td-block">
                           <button type="button" onClick={() => setSelectedLog(log)}>
                             Details
                           </button>

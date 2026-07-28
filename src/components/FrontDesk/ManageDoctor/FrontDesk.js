@@ -114,7 +114,7 @@ export default function FrontDesk() {
         <EmptyState title={emptyTitle} detail="" />
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <table className="qc-rtable" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#f7fafd", color: "#65758b" }}>
                 {["Schedule", "Patient", "Doctor", "Specialty", "Status", "Action"].map((heading) => (
@@ -127,18 +127,18 @@ export default function FrontDesk() {
                 const isToday = String(item.date || "").slice(0, 10) === today;
                 return (
                   <tr key={item.id} style={{ borderTop: "1px solid #eef3f9" }}>
-                    <td style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
+                    <td data-label="Schedule" style={{ padding: "12px 14px", whiteSpace: "nowrap" }}>
                       <div style={{ fontWeight: 900, color: "#162235" }}>{formatDate(item.date)}</div>
                       <div style={{ color: "#6b778c", fontSize: 12 }}>{formatTime(item.time)}</div>
                     </td>
-                    <td style={{ padding: "12px 14px" }}>
+                    <td data-label="Patient" style={{ padding: "12px 14px" }}>
                       <strong style={{ color: "#162235" }}>{item.patient_name}</strong>
                       <div style={{ color: "#6b778c", fontSize: 12 }}>{item.patient_phone || item.patient_email || ""}</div>
                     </td>
-                    <td style={{ padding: "12px 14px" }}>{item.doctor_name || "-"}</td>
-                    <td style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
-                    <td style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
-                    <td style={{ padding: "12px 14px" }}>
+                    <td data-label="Doctor" style={{ padding: "12px 14px" }}>{item.doctor_name || "-"}</td>
+                    <td data-label="Specialty" style={{ padding: "12px 14px" }}>{item.specialty_name || "-"}</td>
+                    <td data-label="Status" style={{ padding: "12px 14px" }}><StatusBadge status={item.status} /></td>
+                    <td data-label="Action" className="qc-td-block" style={{ padding: "12px 14px" }}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {["PENDING", "RESCHEDULED"].includes(item.status) && (
                           <ActionButton disabled={savingId === item.id} tone="success" onClick={() => updateStatus(item, "CONFIRMED")}>
