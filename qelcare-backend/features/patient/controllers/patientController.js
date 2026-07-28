@@ -5,6 +5,20 @@ function getPatientName(patient) {
   return patient.display_name || patient.name || [patient.first_name, patient.last_name].filter(Boolean).join(" ");
 }
 
+// Reject a future (or malformed) date of birth. DOB is optional, so empty passes.
+// Compares date-only strings against today in Asia/Manila (YYYY-MM-DD sorts
+// chronologically, so a plain string compare is correct and timezone-safe).
+function futureDobError(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const text = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "Date of birth must be a valid date.";
+  const todayManila = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  if (text > todayManila) return "Date of birth cannot be in the future.";
+  return null;
+}
+
 const patientController = {
   async create(req, res) {
     try {
@@ -18,6 +32,9 @@ const patientController = {
           message: "First name and last name are required.",
         });
       }
+
+      const dobError = futureDobError(req.body.date_of_birth);
+      if (dobError) return res.status(400).json({ success: false, message: dobError });
 
       const patient = await Patient.create({
         ...req.body,
@@ -98,6 +115,9 @@ const patientController = {
           message: "First name and last name are required.",
         });
       }
+
+      const dobError = futureDobError(req.body.date_of_birth);
+      if (dobError) return res.status(400).json({ success: false, message: dobError });
 
       const patient = await Patient.update(req.params.id, req.body);
       if (!patient) return res.status(404).json({ success: false, message: "Patient not found." });

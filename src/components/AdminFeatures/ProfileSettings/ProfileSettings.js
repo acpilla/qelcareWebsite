@@ -128,7 +128,21 @@ function Avatar({ user, imageVersion, size = 82 }) {
  );
 }
 
-function Field({ label, name, value, onChange, type = "text", placeholder = "", disabled = false }) {
+// App-wide phone rule (matches the backend + registration): PH mobile
+// 09XXXXXXXXX, +639XXXXXXXXX, or international +<10-14 digits>. Optional field ->
+// empty is valid. Returns an inline error string, or "" when valid.
+function validatePhone(value) {
+ const raw = String(value || "").trim();
+ if (!raw) return "";
+ if (raw.length > 20) return "Phone must be 20 characters or less.";
+ const cleaned = raw.replace(/[\s\-()]/g, "");
+ if (!/^(09\d{9}|\+639\d{9}|\+\d{10,14})$/.test(cleaned)) {
+ return "Enter a valid phone, e.g. 09XXXXXXXXX or +639XXXXXXXXX.";
+ }
+ return "";
+}
+
+function Field({ label, name, value, onChange, type = "text", placeholder = "", disabled = false, error = "" }) {
  return (
  <label className="ps-field">
  <span>{label}</span>
@@ -139,7 +153,10 @@ function Field({ label, name, value, onChange, type = "text", placeholder = "", 
  onChange={onChange}
  placeholder={placeholder}
  disabled={disabled}
+ aria-invalid={error ? "true" : undefined}
+ style={error ? { borderColor: "#e2867f", background: "#fff7f7" } : undefined}
  />
+ {error && <small style={{ color: "#b63342", fontSize: 12, fontWeight: 700, marginTop: 4 }}>{error}</small>}
  </label>
  );
 }
@@ -191,6 +208,7 @@ export default function ProfileSettings() {
  const [uploading, setUploading] = useState(false);
  const [editing, setEditing] = useState(false);
  const [alert, setAlert] = useState(null);
+ const [fieldErrors, setFieldErrors] = useState({});
  const [imageVersion, setImageVersion] = useState(Date.now());
  const [passwordForm, setPasswordForm] = useState({
  currentPassword: "",
@@ -240,6 +258,7 @@ export default function ProfileSettings() {
  function handleFormChange(event) {
  const { name, value } = event.target;
  setForm((current) => ({...current, [name]: value }));
+ setFieldErrors((prev) => (prev[name] ? {...prev, [name]: "" } : prev));
  }
 
  function handlePasswordChange(event) {
@@ -257,6 +276,15 @@ export default function ProfileSettings() {
  showAlert("error", "Enter a valid email address.");
  return;
  }
+
+ const phoneErr = validatePhone(form.phone);
+ const altErr = validatePhone(form.alternate_phone);
+ if (phoneErr || altErr) {
+ setFieldErrors({ phone: phoneErr, alternate_phone: altErr });
+ showAlert("error", phoneErr || altErr);
+ return;
+ }
+ setFieldErrors({});
 
  setSaving(true);
  try {
@@ -445,8 +473,8 @@ export default function ProfileSettings() {
  <Field label="Middle Name" name="middle_name" value={form.middle_name} onChange={handleFormChange} disabled={!editing} />
  <Field label="Suffix" name="suffix" value={form.suffix} onChange={handleFormChange} disabled={!editing} placeholder="Jr., Sr., III" />
  <Field label="Email" name="email" value={form.email} onChange={handleFormChange} disabled={!editing} type="email" />
- <Field label="Phone" name="phone" value={form.phone} onChange={handleFormChange} disabled={!editing} />
- <Field label="Alternate Phone" name="alternate_phone" value={form.alternate_phone} onChange={handleFormChange} disabled={!editing} />
+ <Field label="Phone" name="phone" value={form.phone} onChange={handleFormChange} disabled={!editing} error={fieldErrors.phone} />
+ <Field label="Alternate Phone" name="alternate_phone" value={form.alternate_phone} onChange={handleFormChange} disabled={!editing} error={fieldErrors.alternate_phone} />
  <label className="ps-field">
  <span>Gender</span>
  <select name="gender" value={form.gender || ""} onChange={handleFormChange} disabled={!editing}>

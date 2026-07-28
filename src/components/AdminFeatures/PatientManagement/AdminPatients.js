@@ -47,6 +47,15 @@ function formatDate(value) {
   return date.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Today's date (Asia/Manila) as YYYY-MM-DD — the max allowed date of birth.
+function todayInput() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const v = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${v.year}-${v.month}-${v.day}`;
+}
+
 function calculateAge(patient) {
   if (patient.age) return Number(patient.age);
   if (!patient.date_of_birth) return null;
@@ -232,6 +241,10 @@ function PatientModal({ mode, patient, saving, onClose, onSave }) {
       setError("First name and last name are required.");
       return;
     }
+    if (form.date_of_birth && form.date_of_birth > todayInput()) {
+      setError("Date of birth cannot be in the future.");
+      return;
+    }
     onSave({
       ...form,
       first_name: form.first_name.trim(),
@@ -302,7 +315,7 @@ function PatientModal({ mode, patient, saving, onClose, onSave }) {
                 <Field label="Last Name *"><input name="last_name" value={form.last_name} onChange={set} style={inputStyle} /></Field>
                 <Field label="Middle Name"><input name="middle_name" value={form.middle_name} onChange={set} style={inputStyle} /></Field>
                 <Field label="Suffix"><input name="suffix" value={form.suffix} onChange={set} style={inputStyle} /></Field>
-                <Field label="Date of Birth"><input type="date" name="date_of_birth" value={form.date_of_birth} onChange={set} style={inputStyle} /></Field>
+                <Field label="Date of Birth"><input type="date" name="date_of_birth" value={form.date_of_birth} onChange={set} max={todayInput()} min="1900-01-01" style={inputStyle} /></Field>
                 <Field label="Gender">
                   <select name="gender" value={form.gender} onChange={set} style={inputStyle}>
                     {GENDERS.map((value) => <option key={value || "blank"} value={value}>{value || "Not set"}</option>)}

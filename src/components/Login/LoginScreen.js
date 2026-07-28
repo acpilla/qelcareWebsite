@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { saveLoginData, API_URL } from "../../utils/auth";
+import { saveLoginData, API_URL, consumeSessionExpired } from "../../utils/auth";
 
 // """ Icons """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function PlusIcon()     { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"/></svg>; }
@@ -304,6 +304,14 @@ export default function LoginScreen() {
   useEffect(() => {
     const saved = localStorage.getItem("qelcare_remembered_user");
     if (saved) { setUsername(saved); setRememberMe(true); }
+  }, []);
+
+  // Show a notice when a patient was redirected here by the inactivity timeout.
+  useEffect(() => {
+    if (consumeSessionExpired()) {
+      setError("Session expired. You were signed out due to inactivity — please sign in again.");
+      setErrorType("warn");
+    }
   }, []);
 
   const clearFeedback = () => { setError(""); setErrorType("error"); setAttemptsLeft(null); };

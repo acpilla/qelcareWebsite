@@ -13,6 +13,20 @@ function toTitleCase(value) {
  .replace(/(^|[\s'-])([a-zà-ÿ])/g, (_m, sep, ch) => sep + ch.toUpperCase());
 }
 
+// App-wide phone rule (matches registration): PH mobile 09XXXXXXXXX, +639XXXXXXXXX,
+// or international +<10-14 digits>. Field is optional -> empty passes. Length is
+// capped at the users.phone column width (20). Returns an error string or null.
+function phoneError(value, label) {
+ if (value === undefined || value === null || String(value).trim() === "") return null;
+ const raw = String(value).trim();
+ if (raw.length > 20) return `${label} must be 20 characters or less.`;
+ const cleaned = raw.replace(/[\s\-()]/g, "");
+ if (!/^(09\d{9}|\+639\d{9}|\+\d{10,14})$/.test(cleaned)) {
+ return `${label} is invalid. Use 09XXXXXXXXX or +639XXXXXXXXX.`;
+ }
+ return null;
+}
+
 async function roleExists(roleId) {
  const result = await pool.query("SELECT role_id FROM roles WHERE role_id = $1", [roleId]);
  return result.rowCount > 0;
@@ -97,6 +111,9 @@ const updateProfile = async (req, res) => {
  message: "First name and last name are required",
  });
  }
+
+ const phoneMsg = phoneError(req.body.phone, "Phone") || phoneError(req.body.alternate_phone, "Alternate phone");
+ if (phoneMsg) return res.status(400).json({ success: false, message: phoneMsg });
 
  const updated = await User.updateProfile(req.user.user_id, {...req.body,
  email: email || null,

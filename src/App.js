@@ -34,6 +34,7 @@ import MedicalRecords from "./components/UserSide/MedicalRecords";
 import HealthRecords from "./components/UserSide/HealthRecords";
 import MainLayout from "./components/Layout/MainLayout";
 import LandingPage from "./components/LandingPage/LandingPage";
+import PatientIdleTimeout from "./components/Auth/PatientIdleTimeout";
 
 import { getUserRole, isAuthenticated } from "./utils/auth";
 
@@ -85,6 +86,8 @@ function Unauthorized() {
 export default function App() {
   return (
     <BrowserRouter>
+      {/* Patient-only inactivity auto-logout. No-op for all other roles. */}
+      <PatientIdleTimeout />
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginScreen />} />
