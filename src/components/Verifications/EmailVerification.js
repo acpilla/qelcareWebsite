@@ -355,7 +355,10 @@ export default function EmailVerification() {
                             onKeyDown={e => handleCodeKey(i, e)} />
                         ))}
                       </div>
-                      <p className="otp-helper">Enter each digit from your email. Check your spam folder if not received.</p>
+                      <p className="otp-helper">
+                        Enter each digit from your email. Check your spam folder if not received.
+                        {!isRegistration && " No code after a minute? Double-check the email address you entered, or create an account if you don't have one yet."}
+                      </p>
                     </div>
 
                     <div className="actions">

@@ -200,7 +200,10 @@ export default function ForgotPasswordScreen() {
       });
       const data = await res.json();
       if (data.success) {
-        setSuccess("Verification code sent! Redirecting...");
+        // Neutral wording on purpose: the backend does NOT reveal whether an account
+        // exists (anti-enumeration), so we must not imply the email is definitely
+        // registered. If it isn't, no code arrives and the guidance below helps.
+        setSuccess("If an account exists for this email, a 6-digit code is on its way. Redirecting...");
         sessionStorage.setItem("otp_email", email.trim().toLowerCase());
         sessionStorage.setItem("otp_flow", "password_reset");
         sessionStorage.removeItem("otp_code");
@@ -280,13 +283,17 @@ export default function ForgotPasswordScreen() {
                 </div>
 
                 <button className="fp-btn" type="submit" disabled={loading || !!success}>
-                  {loading ? "Sending..." : success ? "Code Sent!" : "Send Verification Code"}
+                  {loading ? "Sending..." : success ? "Check your email" : "Send Verification Code"}
                 </button>
               </form>
 
               <p className="fp-footnote">
                 Remembered your password?{" "}
                 <button className="fp-footnote-link" onClick={() => navigate("/login")}>Sign in here</button>
+              </p>
+              <p className="fp-footnote">
+                No QELCare account for this email?{" "}
+                <button className="fp-footnote-link" onClick={() => navigate("/register")}>Create one</button>
               </p>
             </div>
           </section>
