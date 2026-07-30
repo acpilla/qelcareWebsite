@@ -207,8 +207,9 @@ function PasswordInput({ label, name, value, onChange }) {
 const SECTION_ICONS = {
   identity: (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 21v-1a6 6 0 0 1 12 0v1" />
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="12" cy="10" r="2.5" />
+      <path d="M8.5 16a3.5 3.5 0 0 1 7 0" />
     </svg>
   ),
   contact: (
@@ -740,7 +741,7 @@ export default function ProfileSettings() {
   margin-top: -46px;
   flex-wrap: wrap;
 }
-.ps-id { display: flex; align-items: flex-end; gap: 18px; min-width: 0; }
+.ps-id { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-width: 0; flex: 1 1 auto; }
 .ps-avatar-wrap { position: relative; flex: 0 0 auto; }
 .ps-avatar {
   border-radius: 24px;
@@ -774,17 +775,15 @@ export default function ProfileSettings() {
 .ps-camera:hover { background: #1f4f8f; }
 .ps-camera.disabled { opacity: 0.55; cursor: not-allowed; }
 .ps-camera input { display: none; }
-.ps-idtext { padding-bottom: 4px; min-width: 0; }
+.ps-idtext { min-width: 0; max-width: 100%; }
 .ps-idtext h2 {
   margin: 0;
   font-size: 23px;
   font-weight: 800;
   letter-spacing: -0.2px;
   color: var(--nv-deep);
-  line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 .ps-email { margin: 3px 0 10px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
 .ps-chips { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -1001,7 +1000,6 @@ export default function ProfileSettings() {
 }
 @media (max-width: 620px) {
   .ps-hero-body { flex-direction: column; align-items: stretch; }
-  .ps-id { align-items: center; }
   .ps-tabs { display: flex; }
   .ps-tabs button { flex: 1; justify-content: center; }
   .ps-actions { width: 100%; }
