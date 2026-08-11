@@ -4,6 +4,37 @@ const Queue = require("../../queue/models/Queue");
 const Notification = require("../../notification/models/Notification");
 const emailNotifier = require("../../../shared/utils/emailNotifier");
 const logger = require("../../../shared/utils/activityLogger");
+const db = require("../../../config/database");
+
+// Appointment notifications go to `booked_by`, which may be the patient OR the
+// staff member (Admin/Frontdesk/etc.) who booked on their behalf. Point each
+// notification at an appointments page the RECIPIENT can actually open, so
+// clicking it never lands on the patient-only route and triggers "Access Denied".
+const APPT_ROUTE_BY_ROLE = {
+  Admin: "/admin/appointments",
+  Frontdesk: "/frontdesk/appointments",
+  Doctor: "/doctor/appointments",
+  Nurse: "/nurse/appointments",
+  Cashier: "/cashier/dashboard",
+  Patient: "/patient/appointments",
+};
+
+async function appointmentLinkForUser(userId) {
+  try {
+    const result = await db.query(
+      `SELECT r.role_name AS role
+         FROM users u
+         LEFT JOIN roles r ON u.role_id = r.role_id
+        WHERE u.user_id = $1`,
+      [userId]
+    );
+    const role = result.rows[0]?.role;
+    return APPT_ROUTE_BY_ROLE[role] || "/patient/appointments";
+  } catch (err) {
+    console.error("Notification link role lookup error:", err.message);
+    return "/patient/appointments";
+  }
+}
 
 const TRANSITIONS = {
   PENDING: ["CONFIRMED", "CANCELLED"],
@@ -119,12 +150,13 @@ async function makePatientForBooking({ req, ownerPatient, bookedFor, relative })
 
 async function notifyPatient({ userId, appointment, title, message, type = "appointment" }) {
   try {
+    const link = await appointmentLinkForUser(userId);
     await Notification.create({
       user_id: userId,
       type,
       title,
       message,
-      link: "/patient/appointments",
+      link,
       appointment_id: appointment.id,
       metadata: {
         status: appointment.status,

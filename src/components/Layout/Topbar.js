@@ -106,16 +106,42 @@ async function safeJson(response) {
   }
 }
 
-function formatCreated(value) {
+// Always render notification times in the clinic's timezone (Asia/Manila) so a
+// device with a different/incorrect timezone can't skew what staff see. The API
+// now returns correct absolute instants, so this just anchors the display.
+function formatStamp(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleString("en-PH", {
+    timeZone: "Asia/Manila",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// Appointment notifications are delivered to whoever booked the visit — which
+// may be the patient or the staff member who booked for them. Route the click
+// to an appointments page the CURRENT user can actually open, so it never hits
+// the patient-only route and shows "Access Denied".
+const APPT_ROUTE_BY_ROLE = {
+  Admin: "/admin/appointments",
+  Frontdesk: "/frontdesk/appointments",
+  Doctor: "/doctor/appointments",
+  Nurse: "/nurse/appointments",
+  Cashier: "/cashier/dashboard",
+  Patient: "/patient/appointments",
+};
+
+function resolveNotificationLink(item, role) {
+  const link = item?.link || "";
+  const isAppointment = Boolean(item?.appointment_id) || /\/appointments(\/|\?|$)/.test(link);
+  if (isAppointment) {
+    return APPT_ROUTE_BY_ROLE[role] || link || "/redirect";
+  }
+  return link;
 }
 
 function EmptyNotification() {
@@ -156,7 +182,7 @@ function NotificationItem({ item, onOpen }) {
         <span style={{ display: "block", color: "#0f2744", fontSize: 13, fontWeight: unread ? 900 : 700 }}>{item.title}</span>
         <span style={{ display: "block", color: "#66778a", fontSize: 12, lineHeight: 1.4, marginTop: 3 }}>{item.message}</span>
         <span style={{ display: "inline-flex", marginTop: 7, padding: "3px 7px", borderRadius: 999, color: tone.color, background: tone.bg, fontSize: 10.5, fontWeight: 900 }}>
-          {unread ? "Unread" : "Read"} {formatCreated(item.created_at)}
+          {unread ? "Unread" : "Read"} {formatStamp(unread ? item.created_at : (item.read_at || item.created_at))}
         </span>
       </span>
     </button>
@@ -171,6 +197,7 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifError, setNotifError] = useState("");
+  const [showRead, setShowRead] = useState(false);
   const [user, setUser] = useState(null);
   const dropRef = useRef(null);
   const notifRef = useRef(null);
@@ -233,9 +260,10 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
         setUnreadCount((count) => Math.max(count - 1, 0));
       }
     }
-    if (item.link) {
+    const target = resolveNotificationLink(item, role);
+    if (target) {
       setNotifOpen(false);
-      navigate(item.link);
+      navigate(target);
     }
   }
 
@@ -255,6 +283,14 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
   const location = window.location.pathname;
   const page = PAGE_TITLES[location] || { title: pageTitle || "Dashboard", sub: pageSubtitle || today };
   const topNotification = useMemo(() => notifications.find((item) => !item.is_read), [notifications]);
+  const readCount = useMemo(() => notifications.filter((item) => item.is_read).length, [notifications]);
+  // The bell panel is unread-focused: read items are hidden by default (so the
+  // list matches the "unread" badge and never shows a pile you can't clear), but
+  // remain available behind a "Show read" toggle instead of being deleted.
+  const visibleNotifications = useMemo(
+    () => (showRead ? notifications : notifications.filter((item) => !item.is_read)),
+    [notifications, showRead]
+  );
 
   return (
     <header className="qc-topbar" style={{
@@ -441,14 +477,37 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
               <div style={{ maxHeight: 340, overflowY: "auto" }}>
                 {notifLoading && notifications.length === 0 ? (
                   <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>Loading notifications...</div>
-                ) : notifications.length === 0 ? (
-                  <EmptyNotification />
+                ) : visibleNotifications.length === 0 ? (
+                  !showRead && readCount > 0 ? (
+                    <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>You&apos;re all caught up.</div>
+                  ) : (
+                    <EmptyNotification />
+                  )
                 ) : (
-                  notifications.map((item) => (
+                  visibleNotifications.map((item) => (
                     <NotificationItem key={item.id} item={item} onOpen={openNotification} />
                   ))
                 )}
               </div>
+              {readCount > 0 && (
+                <div style={{ borderTop: "1px solid #f0f4f9", marginTop: 4, paddingTop: 6, display: "flex", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowRead((value) => !value)}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "#5a7a9e",
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      padding: "4px 8px",
+                    }}
+                  >
+                    {showRead ? "Hide read" : `Show read (${readCount})`}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

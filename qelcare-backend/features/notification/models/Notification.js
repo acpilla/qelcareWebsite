@@ -52,8 +52,14 @@ const Notification = {
          appointment_id,
          is_read,
          metadata,
-         created_at,
-         read_at
+         -- created_at / read_at are 'timestamp without time zone' holding Manila
+         -- wall-clock (inserted via NOW() under SET TIMEZONE='Asia/Manila').
+         -- Interpret them AS Asia/Manila so the API returns a correct absolute
+         -- instant (timestamptz) regardless of the server process timezone —
+         -- the deployed backend runs in UTC, which would otherwise read the
+         -- naive value as UTC and shift every timestamp +8h into the future.
+         (created_at AT TIME ZONE 'Asia/Manila') AS created_at,
+         (read_at    AT TIME ZONE 'Asia/Manila') AS read_at
        FROM notifications
        WHERE user_id = $1
        ${unreadSql}
