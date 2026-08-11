@@ -144,14 +144,6 @@ function resolveNotificationLink(item, role) {
   return link;
 }
 
-function EmptyNotification() {
-  return (
-    <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>
-      No notifications.
-    </div>
-  );
-}
-
 function NotificationItem({ item, onOpen }) {
   const unread = !item.is_read;
   const tone = unread
@@ -197,7 +189,6 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifError, setNotifError] = useState("");
-  const [showRead, setShowRead] = useState(false);
   const [user, setUser] = useState(null);
   const dropRef = useRef(null);
   const notifRef = useRef(null);
@@ -283,13 +274,13 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
   const location = window.location.pathname;
   const page = PAGE_TITLES[location] || { title: pageTitle || "Dashboard", sub: pageSubtitle || today };
   const topNotification = useMemo(() => notifications.find((item) => !item.is_read), [notifications]);
-  const readCount = useMemo(() => notifications.filter((item) => item.is_read).length, [notifications]);
-  // The bell panel is unread-focused: read items are hidden by default (so the
-  // list matches the "unread" badge and never shows a pile you can't clear), but
-  // remain available behind a "Show read" toggle instead of being deleted.
+  // The bell shows only unread notifications: once an item is read — by opening
+  // it or via "Read all" — it leaves the panel, matching the unread badge. The
+  // row is retained in the DB (never hard-deleted), so a dedicated history view
+  // could surface it later if needed.
   const visibleNotifications = useMemo(
-    () => (showRead ? notifications : notifications.filter((item) => !item.is_read)),
-    [notifications, showRead]
+    () => notifications.filter((item) => !item.is_read),
+    [notifications]
   );
 
   return (
@@ -478,36 +469,13 @@ export default function Topbar({ sideOpen, onToggle, pageTitle, pageSubtitle }) 
                 {notifLoading && notifications.length === 0 ? (
                   <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>Loading notifications...</div>
                 ) : visibleNotifications.length === 0 ? (
-                  !showRead && readCount > 0 ? (
-                    <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>You&apos;re all caught up.</div>
-                  ) : (
-                    <EmptyNotification />
-                  )
+                  <div style={{ padding: 16, color: "#66778a", fontSize: 13 }}>You&apos;re all caught up.</div>
                 ) : (
                   visibleNotifications.map((item) => (
                     <NotificationItem key={item.id} item={item} onOpen={openNotification} />
                   ))
                 )}
               </div>
-              {readCount > 0 && (
-                <div style={{ borderTop: "1px solid #f0f4f9", marginTop: 4, paddingTop: 6, display: "flex", justifyContent: "center" }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowRead((value) => !value)}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: "#5a7a9e",
-                      fontSize: 11.5,
-                      fontWeight: 800,
-                      cursor: "pointer",
-                      padding: "4px 8px",
-                    }}
-                  >
-                    {showRead ? "Hide read" : `Show read (${readCount})`}
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
