@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt");
 const tokenManager = require("../../../shared/utils/tokenManager");
 const authService = require("../services/authService");
 const logger = require("../../../shared/utils/activityLogger");
+const passwordHistory = require("../../../shared/utils/passwordHistory");
 const {
   validateLoginInput,
   validateEmail,
@@ -352,10 +353,9 @@ const resetPassword = async (req, res) => {
       return res.status(403).json({ success: false, message: "Verify your email before resetting your password" });
     }
 
-    const isSame = await bcrypt.compare(newPassword, user.password);
-    if (isSame) {
+    if (await passwordHistory.isPasswordReused(client, user.user_id, newPassword, user.password)) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ success: false, message: "New password cannot be the same as the old password" });
+      return res.status(400).json({ success: false, message: passwordHistory.REUSE_MESSAGE });
     }
 
     const otp = await authService.verifyOTP(email, code, {
@@ -382,6 +382,9 @@ const resetPassword = async (req, res) => {
        WHERE user_id = $2`,
       [hashedPassword, user.user_id]
     );
+
+    // Remember the retired password so it can't be reused on a future reset/change.
+    await passwordHistory.recordRetiredPassword(client, user.user_id, user.password);
 
     await client.query("DELETE FROM active_tokens WHERE user_id = $1", [user.user_id]);
     await client.query("COMMIT");
@@ -436,10 +439,9 @@ const changePassword = async (req, res) => {
       return res.status(401).json({ success: false, message: "Current password is incorrect" });
     }
 
-    const isSame = await bcrypt.compare(newPassword, user.password);
-    if (isSame) {
+    if (await passwordHistory.isPasswordReused(client, req.user.user_id, newPassword, user.password)) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ success: false, message: "New password cannot be the same as the current password" });
+      return res.status(400).json({ success: false, message: passwordHistory.REUSE_MESSAGE });
     }
 
     const hashed = await bcrypt.hash(newPassword, 12);
@@ -451,6 +453,9 @@ const changePassword = async (req, res) => {
        WHERE user_id = $2`,
       [hashed, req.user.user_id]
     );
+
+    // Remember the retired password so it can't be reused on a future reset/change.
+    await passwordHistory.recordRetiredPassword(client, req.user.user_id, user.password);
 
     await client.query("DELETE FROM active_tokens WHERE user_id = $1", [req.user.user_id]);
     await client.query("COMMIT");

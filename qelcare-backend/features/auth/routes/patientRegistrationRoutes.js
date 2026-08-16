@@ -577,9 +577,14 @@ router.put("/profile", authenticate, authorize(["Patient"]), async (req, res) =>
     }
 
     await client.query(
+      // $3 (email) is used both as a column assignment AND inside LOWER(). Without
+      // a cast Postgres deduces two different types for it (varchar vs text) and
+      // throws 42P08 "inconsistent types deduced for parameter $3", which failed
+      // EVERY profile save. Pin $3 to ::text in both spots (mirrors the web
+      // /users/me update in features/user/models/User.js).
       `UPDATE users
           SET username = $2,
-              email = $3,
+              email = $3::text,
               first_name = $4,
               last_name = $5,
               middle_name = $6,
@@ -588,7 +593,7 @@ router.put("/profile", authenticate, authorize(["Patient"]), async (req, res) =>
               alternate_phone = $9,
               gender = $10,
               date_of_birth = $11,
-              email_changed_at = CASE WHEN LOWER(email) <> LOWER($3) THEN NOW() ELSE email_changed_at END,
+              email_changed_at = CASE WHEN LOWER(email) <> LOWER($3::text) THEN NOW() ELSE email_changed_at END,
               updated_at = NOW()
         WHERE user_id = $1`,
       [userId, username, email, firstName, lastName, middleName || null, suffix || null, phone || null, alternatePhone || null, gender, dateOfBirth]

@@ -342,26 +342,29 @@ function VisitProgress({ appointment }) {
       <div style={{ fontSize: 12, color: "#6b778c", marginBottom: 14 }}>
         {appointment.doctor_name || "Doctor"}{appointment.specialty_name ? ` - ${appointment.specialty_name}` : ""} - {formatDate(appointment.date)} at {formatTime(appointment.time)}
       </div>
+      {/* Each stage is an equal, shrinkable flex column (minWidth:0) so all five
+          stages always fit the screen width and the labels never overlap on
+          narrow phones. The progress line is drawn behind the circles, from one
+          circle's centre to the next. */}
       <div style={{ display: "flex", alignItems: "flex-start" }}>
         {VISIT_STAGES.map((stage, i) => {
           const done = i < idx;
           const current = i === idx;
           return (
-            <React.Fragment key={stage.key}>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, flex: "0 0 auto", width: 66 }}>
-                <div style={{
-                  width: 30, height: 30, borderRadius: 999,
-                  background: done ? "#0e8a7a" : current ? "#163a6b" : "#eef2f6",
-                  color: done || current ? "#fff" : "#94a2b6",
-                  display: "grid", placeItems: "center", fontWeight: 900, fontSize: 13,
-                  boxShadow: current ? "0 0 0 4px rgba(22,58,107,.15)" : "none",
-                }}>{i + 1}</div>
-                <div style={{ fontSize: 11, fontWeight: 800, textAlign: "center", color: done ? "#0e8a7a" : current ? "#163a6b" : "#94a2b6" }}>{stage.label}</div>
-              </div>
+            <div key={stage.key} style={{ position: "relative", flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
               {i < VISIT_STAGES.length - 1 && (
-                <div style={{ flex: 1, height: 3, borderRadius: 2, background: i < idx ? "#0e8a7a" : "#e3ebf5", marginTop: 14 }} />
+                <div style={{ position: "absolute", top: 13.5, left: "50%", width: "100%", height: 3, borderRadius: 2, background: i < idx ? "#0e8a7a" : "#e3ebf5", zIndex: 0 }} />
               )}
-            </React.Fragment>
+              <div style={{
+                position: "relative", zIndex: 1,
+                width: 30, height: 30, borderRadius: 999,
+                background: done ? "#0e8a7a" : current ? "#163a6b" : "#eef2f6",
+                color: done || current ? "#fff" : "#94a2b6",
+                display: "grid", placeItems: "center", fontWeight: 900, fontSize: 13,
+                boxShadow: current ? "0 0 0 4px rgba(22,58,107,.15)" : "none",
+              }}>{i + 1}</div>
+              <div style={{ fontSize: 10, lineHeight: 1.2, fontWeight: 800, textAlign: "center", overflowWrap: "anywhere", color: done ? "#0e8a7a" : current ? "#163a6b" : "#94a2b6" }}>{stage.label}</div>
+            </div>
           );
         })}
       </div>
