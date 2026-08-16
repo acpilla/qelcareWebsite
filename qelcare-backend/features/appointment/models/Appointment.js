@@ -7,6 +7,12 @@ const ACTIVE_CONFLICT_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLI
 const ACTIVE_VISIBLE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "RESCHEDULED"];
 const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
 
+// Anti-spam: after a patient CANCELS, they must wait this many seconds before
+// they can book or cancel again. Cancelling is the churn signal, so this stops
+// rapid book<->cancel spam while leaving legitimate multi-booking and undoing a
+// fresh mistake (a first cancel) unaffected. Tunable here in one place.
+const PATIENT_ACTION_COOLDOWN_SECONDS = 120;
+
 function normalizeStatus(status) {
   return String(status || "").trim().toUpperCase();
 }
@@ -502,6 +508,87 @@ const Appointment = {
       [String(graceMinutes)]
     );
     return { settled: result.rowCount, ids: result.rows.map((r) => r.id) };
+  },
+
+  // --------------------------------------------------------------------------
+  // assertAppointmentCooldown
+  //   Anti-spam guard for patient self-service. If the patient cancelled an
+  //   appointment within PATIENT_ACTION_COOLDOWN_SECONDS, block the next booking
+  //   OR cancellation and tell them how long to wait. Uses the DB clock (no
+  //   client clock skew). A patient who has never cancelled is never blocked.
+  // --------------------------------------------------------------------------
+  async assertAppointmentCooldown(userId) {
+    const { rows } = await db.query(
+      `SELECT EXTRACT(EPOCH FROM (NOW() - MAX(updated_at)))::int AS elapsed
+         FROM appointments
+        WHERE cancelled_by = $1::integer AND status = 'CANCELLED'`,
+      [userId]
+    );
+    const elapsed = rows[0]?.elapsed;
+    if (elapsed !== null && elapsed !== undefined && elapsed < PATIENT_ACTION_COOLDOWN_SECONDS) {
+      const wait = PATIENT_ACTION_COOLDOWN_SECONDS - elapsed;
+      throw {
+        statusCode: 429,
+        message: `You recently cancelled an appointment. Please wait ${wait} more second${wait === 1 ? "" : "s"} before booking or cancelling again.`,
+      };
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // cancelByPatient
+  //   Atomically cancel a patient's OWN appointment. The row is locked with
+  //   SELECT ... FOR UPDATE and all rules are re-checked on the locked row
+  //   inside the transaction, so two simultaneous cancel requests can't both go
+  //   through: the first cancels, the second waits for the lock, then sees the
+  //   already-CANCELLED row and returns a clean error instead of double-firing
+  //   notifications/logs or corrupting state. Returns the fresh appointment.
+  // --------------------------------------------------------------------------
+  async cancelByPatient(id, userId, reason) {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const current = (await client.query(
+        `SELECT id, booked_by, status, TO_CHAR(date, 'YYYY-MM-DD') AS date, time::text AS time
+           FROM appointments
+          WHERE id = $1::integer
+          FOR UPDATE`,
+        [id]
+      )).rows[0];
+
+      if (!current) throw { statusCode: 404, message: "Appointment not found." };
+      if (Number(current.booked_by) !== Number(userId)) {
+        throw { statusCode: 403, message: "You can only cancel your own appointments." };
+      }
+      if (TERMINAL_STATUSES.includes(current.status)) {
+        throw { statusCode: 400, message: `This appointment is already ${current.status.toLowerCase().replace("_", " ")}.` };
+      }
+      if (isPastManila(current.date, current.time)) {
+        throw { statusCode: 400, message: "This appointment time has already passed. Please contact the clinic." };
+      }
+      if (!["PENDING", "RESCHEDULED"].includes(current.status)) {
+        throw { statusCode: 400, message: "This appointment is already confirmed by the clinic. To change or cancel it, please call the clinic at (02) 8842-5405." };
+      }
+
+      await client.query(
+        `UPDATE appointments
+            SET status = 'CANCELLED',
+                cancelled_by = $2::integer,
+                cancel_reason = $3::text,
+                updated_at = NOW()
+          WHERE id = $1::integer`,
+        [id, userId, reason]
+      );
+
+      await client.query("COMMIT");
+      const appointment = await this.findById(id);
+      return { appointment, fromStatus: current.status };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   },
 
   // NOTE: the FOR_BILLING -> COMPLETED flip now happens inside Billing.create's

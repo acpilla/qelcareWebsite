@@ -536,6 +536,11 @@ const appointmentController = {
         return res.status(400).json({ success: false, message: "doctor_id, date, and time are required." });
       }
 
+      // Anti-spam: a patient who just cancelled must wait before booking again
+      // (blocks rapid book<->cancel churn). Checked before any patient record is
+      // created for a relative booking.
+      await Appointment.assertAppointmentCooldown(req.user.user_id);
+
       Appointment.assertNotPastManila(date, time);
       Appointment.assertWithinClinicHours(time);
 
@@ -617,31 +622,17 @@ const appointmentController = {
   // not already in the live queue). Ownership is enforced via booked_by.
   async cancelMine(req, res) {
     try {
-      const current = await Appointment.getRawById(req.params.id);
-      if (!current) return res.status(404).json({ success: false, message: "Appointment not found." });
-      if (Number(current.booked_by) !== Number(req.user.user_id)) {
-        return res.status(403).json({ success: false, message: "You can only cancel your own appointments." });
-      }
-      if (Appointment.TERMINAL_STATUSES.includes(current.status)) {
-        return res.status(400).json({ success: false, message: `This appointment is already ${current.status.toLowerCase().replace("_", " ")}.` });
-      }
-      if (Appointment.isPastManila(current.date, current.time)) {
-        return res.status(400).json({ success: false, message: "This appointment time has already passed. Please contact the clinic." });
-      }
-      // Once the clinic confirms (or you're in the queue), self-service is locked.
-      // The patient must call the clinic so staff can adjust the schedule/queue.
-      if (!["PENDING", "RESCHEDULED"].includes(current.status)) {
-        return res.status(400).json({
-          success: false,
-          message: "This appointment is already confirmed by the clinic. To change or cancel it, please call the clinic at (02) 8842-5405.",
-        });
-      }
+      // Anti-spam: block rapid book<->cancel churn (throws 429 if too soon).
+      await Appointment.assertAppointmentCooldown(req.user.user_id);
 
       const reason = String(req.body.cancel_reason || "").trim() || "Cancelled by patient.";
-      const appointment = await Appointment.updateStatus(req.params.id, "CANCELLED", {
-        cancelled_by: req.user.user_id,
-        cancel_reason: reason,
-      });
+      // Atomic, row-locked cancel: ownership + allowed-state rules are re-checked
+      // on the locked row, so two simultaneous cancels can't both go through.
+      const { appointment, fromStatus } = await Appointment.cancelByPatient(
+        req.params.id,
+        req.user.user_id,
+        reason
+      );
 
       await notifyPatient({
         userId: req.user.user_id,
@@ -658,7 +649,7 @@ const appointmentController = {
         entityId: appointment.id,
         description: `Patient cancelled appointment #${appointment.id}`,
         ip: logger.getIP(req),
-        metadata: { reason, from: current.status },
+        metadata: { reason, from: fromStatus },
       });
 
       res.json({ success: true, message: "Appointment cancelled.", data: appointment, appointment });
