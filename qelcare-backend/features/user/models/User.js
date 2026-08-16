@@ -397,12 +397,21 @@ class User {
  }
 
  static async updateStatus(userId, status) {
+ // Setting a user to any non-locked status (e.g. an admin activating a locked
+ // account back to "verified") must FULLY clear the lock state — the failed
+ // login counter AND the lockout timer. Otherwise the account is left sitting
+ // at the lock threshold and the login flow re-locks it on the very next
+ // attempt (attempts stays at 8 -> 8+1 >= 8 -> "Account permanently locked").
+ const clearLock = status !== "locked";
  const result = await pool.query(
  `UPDATE users
- SET status = $1, updated_at = NOW()
+ SET status = $1,
+ failed_login_attempts = CASE WHEN $3::boolean THEN 0 ELSE failed_login_attempts END,
+ lockout_until = CASE WHEN $3::boolean THEN NULL ELSE lockout_until END,
+ updated_at = NOW()
  WHERE user_id = $2
- RETURNING user_id, status`,
- [status, userId]
+ RETURNING user_id, status, failed_login_attempts, lockout_until`,
+ [status, userId, clearLock]
  );
  return result.rows[0] || null;
  }
