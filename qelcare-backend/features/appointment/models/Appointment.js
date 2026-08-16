@@ -130,7 +130,11 @@ const BASE_SELECT = `
     (
       a.status IN ('COMPLETED','CANCELLED','NO_SHOW')
       OR (
-        a.status IN ('PENDING','CONFIRMED','IN_QUEUE','RESCHEDULED')
+        -- Pre-visit requests only. IN_QUEUE / FOR_BILLING mean the patient is
+        -- physically mid-visit (in the queue / awaiting payment); they stay
+        -- active until a terminal status and are never aged into history by the
+        -- clock, so the patient's live visit-progress bar keeps advancing.
+        a.status IN ('PENDING','CONFIRMED','RESCHEDULED')
         AND (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')
       )
     ) AS is_history,
@@ -266,7 +270,9 @@ const Appointment = {
     }
     if (scope === "history") {
       params.push(TERMINAL_STATUSES);
-      conditions.push(`(a.status = ANY($${params.length}) OR (a.status = ANY('{PENDING,CONFIRMED,IN_QUEUE,RESCHEDULED}'::varchar[]) AND (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')))`);
+      // IN_QUEUE / FOR_BILLING are mid-visit (still active), so history is only
+      // terminal statuses or pre-visit requests whose scheduled time has passed.
+      conditions.push(`(a.status = ANY($${params.length}) OR (a.status = ANY('{PENDING,CONFIRMED,RESCHEDULED}'::varchar[]) AND (a.date + a.time) <= (NOW() AT TIME ZONE 'Asia/Manila')))`);
     }
     if (search) {
       params.push(`%${search}%`);

@@ -62,7 +62,10 @@ function scheduleKey(item) {
 function isHistory(item) {
   if (item.is_history === true) return true;
   if (TERMINAL_STATUSES.includes(item.status)) return true;
-  if (item.status === "FOR_BILLING") return false; // visit done but awaiting payment = still active
+  // Mid-visit: the patient is physically at the clinic (in the queue / in
+  // consultation, or done and awaiting payment). Never age these into history
+  // by the clock — they stay active until a terminal status.
+  if (item.status === "IN_QUEUE" || item.status === "FOR_BILLING") return false;
   return ACTIVE_STATUSES.includes(item.status) && scheduleKey(item) <= manilaNowParts();
 }
 
@@ -118,8 +121,10 @@ export default function PatientAppointments() {
   const [editing, setEditing] = useState(null);
   const [editForm, setEditForm] = useState({ date: "", time: "" });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `silent` = background poll: don't toggle the loading spinner and don't wipe
+  // the visible list/bar on a transient error, so the live sync is seamless.
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError("");
     try {
       const response = await authFetch("/appointments/me?limit=100");
@@ -127,15 +132,28 @@ export default function PatientAppointments() {
       if (!response.ok) throw new Error(payload.message || "Failed to load appointments.");
       setAppointments(getRows(payload, "appointments"));
     } catch (err) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Keep the live visit-progress bar in step with clinic staff actions (confirm,
+  // queue, bill, complete) without the patient having to hit Refresh. Poll quietly
+  // while the Upcoming tab is showing and the app tab is visible.
+  useEffect(() => {
+    if (activeTab !== "upcoming") return undefined;
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        load(true);
+      }
+    }, 30000);
+    return () => clearInterval(id);
+  }, [activeTab, load]);
 
   async function cancelAppt(item) {
     const reason = window.prompt(`Cancel appointment #${item.id} on ${formatDate(item.date)} at ${formatTime(item.time)}?\n\nPlease enter a reason for cancelling:`, "");
@@ -193,6 +211,25 @@ export default function PatientAppointments() {
     [appointments]
   );
 
+  // The visit-progress bar tracks the patient's CURRENT visit. Priority:
+  //  1) a visit physically in progress (in queue / awaiting payment), whatever
+  //     its scheduled time — that is where the patient actually is right now;
+  //  2) otherwise the soonest still-upcoming (pending/confirmed) visit;
+  //  3) otherwise a visit COMPLETED today, so the bar reaches "Completed" and
+  //     stays visible for the rest of the day instead of vanishing on payment.
+  const currentVisit = useMemo(() => {
+    const inClinic = appointments
+      .filter((item) => item.status === "IN_QUEUE" || item.status === "FOR_BILLING")
+      .sort(compareUpcoming);
+    if (inClinic.length) return inClinic[0];
+    if (upcoming.length) return upcoming[0];
+    const today = todayISO();
+    const completedToday = appointments
+      .filter((item) => item.status === "COMPLETED" && String(item.date).slice(0, 10) === today)
+      .sort(compareHistory);
+    return completedToday[0] || null;
+  }, [appointments, upcoming]);
+
   function changeTab(tab) {
     setParams(tab === "upcoming" ? {} : { tab });
   }
@@ -208,7 +245,7 @@ export default function PatientAppointments() {
               </TabButton>
             ))}
           </div>
-          <ActionButton tone="secondary" onClick={load}>Refresh</ActionButton>
+          <ActionButton tone="secondary" onClick={() => load()}>Refresh</ActionButton>
         </div>
       </Panel>
 
@@ -224,7 +261,7 @@ export default function PatientAppointments() {
         <LoadingState label="Loading appointments..." />
       ) : activeTab === "upcoming" ? (
         <>
-          {upcoming.length > 0 && <VisitProgress appointment={upcoming[0]} />}
+          {currentVisit && <VisitProgress appointment={currentVisit} />}
           <AppointmentTable
             title="Upcoming Appointments"
             rows={upcoming}
