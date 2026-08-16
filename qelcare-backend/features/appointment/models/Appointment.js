@@ -3,7 +3,12 @@ const db = require("../../../config/database");
 const VALID_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "COMPLETED", "CANCELLED", "RESCHEDULED", "NO_SHOW"];
 const VALID_TYPES = ["consultation", "follow_up", "walk_in", "emergency"];
 const VALID_BOOKED_FOR = ["self", "other"];
-const ACTIVE_CONFLICT_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "COMPLETED"];
+// A doctor/date/time slot is only "taken" once an appointment there is CONFIRMED
+// (or has moved past confirmation). PENDING / RESCHEDULED requests do NOT hold the
+// slot on purpose, so several patients can request the same slot and the clinic
+// picks one at confirmation time. (Must stay in sync with the uq_doctor_datetime
+// partial unique index — see database/appointment_slot_confirmed_only.sql.)
+const ACTIVE_CONFLICT_STATUSES = ["CONFIRMED", "IN_QUEUE", "FOR_BILLING", "COMPLETED"];
 const ACTIVE_VISIBLE_STATUSES = ["PENDING", "CONFIRMED", "IN_QUEUE", "FOR_BILLING", "RESCHEDULED"];
 const TERMINAL_STATUSES = ["COMPLETED", "CANCELLED", "NO_SHOW"];
 
@@ -109,7 +114,7 @@ async function assertNoDoctorConflict({ doctor_id, date, time, excludeId = null 
   );
 
   if (conflict.rowCount > 0) {
-    throw { statusCode: 409, message: "Doctor already has an active appointment at this time." };
+    throw { statusCode: 409, message: "This time slot is already confirmed for another patient. Please choose a different time." };
   }
 }
 
@@ -375,6 +380,87 @@ const Appointment = {
 
     if (!result.rows[0]) return null;
     return this.findById(result.rows[0].id);
+  },
+
+  // --------------------------------------------------------------------------
+  // confirmAndDeclineConflicts
+  //   Confirm a PENDING / RESCHEDULED appointment and claim its slot. Because
+  //   PENDING requests don't hold a slot, several patients may have requested the
+  //   same doctor/date/time — confirmation is what locks it in. This method:
+  //     1. Locks the target row (FOR UPDATE) and checks it is still pending.
+  //     2. Flips it to CONFIRMED. The uq_doctor_datetime partial unique index
+  //        (now covering only CONFIRMED+ statuses) guarantees at most one
+  //        confirmed appointment per slot; a lost race surfaces as a clean 409.
+  //     3. Auto-declines every OTHER still-pending request for that exact slot
+  //        (CANCELLED with a clear reason) so double-booking is impossible.
+  //   Returns { appointment, declined: [{ id, booked_by, patient_id }] }.
+  // --------------------------------------------------------------------------
+  async confirmAndDeclineConflicts(id, confirmedBy) {
+    const client = await db.connect();
+    let slot;
+    try {
+      await client.query("BEGIN");
+
+      const current = (await client.query(
+        `SELECT id, doctor_id, TO_CHAR(date, 'YYYY-MM-DD') AS date, time::text AS time, status
+           FROM appointments
+          WHERE id = $1::integer
+          FOR UPDATE`,
+        [id]
+      )).rows[0];
+
+      if (!current) throw { statusCode: 404, message: "Appointment not found." };
+      if (!["PENDING", "RESCHEDULED"].includes(current.status)) {
+        throw { statusCode: 400, message: `Only a pending appointment can be confirmed (this one is ${current.status.toLowerCase()}).` };
+      }
+
+      slot = { doctor_id: current.doctor_id, date: current.date, time: current.time };
+
+      try {
+        await client.query(
+          `UPDATE appointments SET status = 'CONFIRMED', updated_at = NOW() WHERE id = $1::integer`,
+          [id]
+        );
+      } catch (err) {
+        if (err.code === "23505" && err.constraint === "uq_doctor_datetime") {
+          throw { statusCode: 409, message: "This time slot has already been confirmed for another patient." };
+        }
+        throw err;
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      client.release();
+      throw err;
+    }
+    client.release();
+
+    // The slot is now locked to the confirmed appointment. Decline the other
+    // still-pending requests for the same slot. Done as a separate statement so
+    // it can't deadlock against a concurrent confirm of one of those very rows.
+    let declined = [];
+    try {
+      declined = (await db.query(
+        `UPDATE appointments
+            SET status = 'CANCELLED',
+                cancelled_by = $4::integer,
+                cancel_reason = 'This time slot was confirmed for another patient.',
+                updated_at = NOW()
+          WHERE doctor_id = $1::integer
+            AND date = $2::date
+            AND time = $3::time
+            AND id <> $5::integer
+            AND status IN ('PENDING', 'RESCHEDULED')
+          RETURNING id, booked_by, patient_id`,
+        [slot.doctor_id, slot.date, slot.time, confirmedBy, id]
+      )).rows;
+    } catch (err) {
+      console.error("Auto-decline conflicting requests error:", err.message);
+    }
+
+    const appointment = await this.findById(id);
+    return { appointment, declined };
   },
 
   async reschedule(id, { date, time }) {

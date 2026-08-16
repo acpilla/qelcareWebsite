@@ -390,10 +390,21 @@ const appointmentController = {
         return res.status(400).json({ success: false, message: "Cancellation reason is required." });
       }
 
-      let appointment = await Appointment.updateStatus(req.params.id, nextStatus, {
-        cancelled_by: req.user.user_id,
-        cancel_reason,
-      });
+      let appointment;
+      let declinedConflicts = [];
+      if (nextStatus === "CONFIRMED") {
+        // Confirming claims the slot: atomically set CONFIRMED (a lost race with
+        // another confirm for the same slot returns 409) and auto-decline any
+        // other still-pending requests for that exact slot.
+        const confirmResult = await Appointment.confirmAndDeclineConflicts(req.params.id, req.user.user_id);
+        appointment = confirmResult.appointment;
+        declinedConflicts = confirmResult.declined;
+      } else {
+        appointment = await Appointment.updateStatus(req.params.id, nextStatus, {
+          cancelled_by: req.user.user_id,
+          cancel_reason,
+        });
+      }
       let queueEntry = null;
       let finalStatus = nextStatus;
       let message = "Status updated.";
@@ -451,12 +462,28 @@ const appointmentController = {
         },
       });
 
+      // Notify the patients whose competing pending requests were auto-declined
+      // because this slot was confirmed for someone else.
+      for (const conflict of declinedConflicts) {
+        if (!conflict.booked_by) continue;
+        await notifyPatient({
+          userId: conflict.booked_by,
+          appointment: { id: conflict.id, status: "CANCELLED", date: appointment.date, time: appointment.time, booked_for: "self" },
+          title: "Appointment request declined",
+          message: `The ${appointment.date} ${appointment.time} slot was confirmed for another patient, so your request #${conflict.id} was declined. Please book a different time.`,
+          type: "appointment_status",
+        });
+      }
+
       res.json({
         success: true,
-        message,
+        message: declinedConflicts.length
+          ? `${message} ${declinedConflicts.length} other pending request(s) for this slot were declined.`
+          : message,
         data: appointment,
         appointment,
         queue_entry: queueEntry,
+        declined_conflicts: declinedConflicts.map((c) => c.id),
       });
     } catch (err) {
       if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
