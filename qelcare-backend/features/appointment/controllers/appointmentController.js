@@ -5,6 +5,7 @@ const Notification = require("../../notification/models/Notification");
 const emailNotifier = require("../../../shared/utils/emailNotifier");
 const logger = require("../../../shared/utils/activityLogger");
 const db = require("../../../config/database");
+const { sweepStaleQueue } = require("../../../shared/utils/queueSweep");
 
 // Appointment notifications go to `booked_by`, which may be the patient OR the
 // staff member (Admin/Frontdesk/etc.) who booked on their behalf. Point each
@@ -248,6 +249,7 @@ const appointmentController = {
       if (role === "Admin" || role === "Frontdesk") {
         try {
           await Appointment.autoSettlePastAppointments({ graceMinutes: 120 });
+          await sweepStaleQueue({ skipGraceMinutes: 30, clinicCloseHour: 20 });
         } catch (sweepErr) {
           console.error("Lazy auto-settle error:", sweepErr.message);
         }

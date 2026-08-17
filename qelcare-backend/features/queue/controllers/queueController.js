@@ -1,6 +1,7 @@
 const Queue = require("../models/Queue");
 const Vital = require("../../vitals/models/Vital");
 const logger = require("../../../shared/utils/activityLogger");
+const { sweepStaleQueue } = require("../../../shared/utils/queueSweep");
 
 function todayISO() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -78,6 +79,9 @@ const queueController = {
   async getSpecialties(req, res) {
     try {
       const date = req.query.date || todayISO();
+      // Self-heal the live queue: resolve stale / skipped no-shows before showing it.
+      try { await sweepStaleQueue({ skipGraceMinutes: 30, clinicCloseHour: 20 }); }
+      catch (sweepErr) { console.error("Queue sweep error:", sweepErr.message); }
       const specialties = await Queue.getSpecialties(date);
       res.json({ success: true, data: specialties, specialties });
     } catch (err) {

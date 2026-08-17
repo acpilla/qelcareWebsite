@@ -6,6 +6,7 @@ require("dotenv").config();
 
 const tokenManager = require("./shared/utils/tokenManager");
 const Appointment = require("./features/appointment/models/Appointment");
+const { sweepStaleQueue } = require("./shared/utils/queueSweep");
 
 const app = express();
 
@@ -128,6 +129,12 @@ async function runAppointmentSweep() {
     const result = await Appointment.autoSettlePastAppointments({ graceMinutes: 120 });
     if (result.settled > 0) {
       console.log(`Appointment sweep: settled ${result.settled} past appointment(s) to NO_SHOW.`);
+    }
+    // Also resolve stale live-queue entries (past-day leftovers + skipped
+    // no-shows) that a slot-based sweep can't see, and notify those patients.
+    const queueResult = await sweepStaleQueue({ skipGraceMinutes: 30, clinicCloseHour: 20 });
+    if (queueResult.appointments.length > 0) {
+      console.log(`Queue sweep: no-showed ${queueResult.appointments.length} stale queued appointment(s).`);
     }
   } catch (err) {
     console.error("Appointment sweep error:", err.message);

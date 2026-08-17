@@ -419,6 +419,83 @@ const Queue = {
       queue: queue.rows,
     };
   },
+
+  // --------------------------------------------------------------------------
+  // autoNoShowStale
+  //   Resolves stale LIVE-QUEUE entries that were never finished and marks the
+  //   patient a NO_SHOW on BOTH the queue entry and the linked appointment,
+  //   atomically. This is the missing lifecycle step that let IN_QUEUE
+  //   appointments (including nurse-SKIPPED ones) linger in the queue forever.
+  //
+  //   A non-final entry (not DONE/NO_SHOW/CANCELLED) becomes NO_SHOW when:
+  //     * it belongs to a PAST clinic day (queue_date < today), OR
+  //     * it was SKIPPED and the patient hasn't returned within skipGraceMinutes, OR
+  //     * it is still WAITING/SKIPPED today after the clinic has closed.
+  //   CALLED / IN_PROGRESS entries for TODAY are left alone (the patient is
+  //   actively being called/seen). Row-locked (FOR UPDATE) so it is safe to run
+  //   concurrently with nurse actions and other sweeps.
+  //
+  //   Returns { settled, appointments: [{ id, booked_by, date, time }] }.
+  // --------------------------------------------------------------------------
+  async autoNoShowStale({ skipGraceMinutes = 30, clinicCloseHour = 20 } = {}) {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+
+      const stale = (await client.query(
+        `SELECT queue_id, appointment_id
+           FROM queue_entries
+          WHERE status NOT IN ('DONE', 'NO_SHOW', 'CANCELLED')
+            AND (
+              queue_date < (NOW() AT TIME ZONE 'Asia/Manila')::date
+              OR (status = 'SKIPPED'
+                  AND updated_at <= NOW() - ($1::text || ' minutes')::interval)
+              OR (queue_date = (NOW() AT TIME ZONE 'Asia/Manila')::date
+                  AND status IN ('WAITING', 'SKIPPED')
+                  AND (NOW() AT TIME ZONE 'Asia/Manila')::time >= ($2::text || ':00:00')::time)
+            )
+          FOR UPDATE`,
+        [String(skipGraceMinutes), String(clinicCloseHour)]
+      )).rows;
+
+      const queueIds = stale.map((s) => s.queue_id);
+      const apptIds = [...new Set(stale.map((s) => s.appointment_id).filter(Boolean))];
+
+      if (queueIds.length) {
+        await client.query(
+          `UPDATE queue_entries
+              SET status = 'NO_SHOW', completed_at = NOW(), updated_at = NOW()
+            WHERE queue_id = ANY($1::int[])`,
+          [queueIds]
+        );
+      }
+
+      // No-show the linked appointments, plus any orphan IN_QUEUE appointment
+      // whose date is already a past clinic day (safety net for data drift).
+      const appointments = (await client.query(
+        `UPDATE appointments
+            SET status = 'NO_SHOW', updated_at = NOW()
+          WHERE status NOT IN ('COMPLETED', 'CANCELLED', 'NO_SHOW')
+            AND (
+              id = ANY($1::int[])
+              OR (status = 'IN_QUEUE'
+                  AND date < (NOW() AT TIME ZONE 'Asia/Manila')::date)
+            )
+          RETURNING id, booked_by,
+                    TO_CHAR(date, 'Mon DD, YYYY') AS date,
+                    TO_CHAR(time, 'HH12:MI AM') AS time`,
+        [apptIds]
+      )).rows;
+
+      await client.query("COMMIT");
+      return { settled: queueIds.length, appointments };
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
 };
 
 module.exports = Queue;
