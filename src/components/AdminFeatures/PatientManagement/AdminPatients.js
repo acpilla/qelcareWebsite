@@ -270,8 +270,8 @@ function PatientModal({ mode, patient, saving, onClose, onSave }) {
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(10,20,35,.58)", display: "grid", placeItems: "center", padding: 22 }}
     >
-      <div style={{ width: "min(860px,100%)", maxHeight: "90vh", overflow: "hidden", background: "#fff", borderRadius: 16, boxShadow: "0 24px 70px rgba(15,23,42,.28)" }}>
-        <div style={{ padding: "18px 22px", background: C.blue, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+      <div style={{ width: "min(860px,100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "#fff", borderRadius: 16, boxShadow: "0 24px 70px rgba(15,23,42,.28)" }}>
+        <div style={{ flexShrink: 0, padding: "18px 22px", background: C.blue, color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div>
             <div style={{ fontSize: 18, fontWeight: 900 }}>{isView ? "Patient Details" : isEdit ? "Edit Patient" : "Add Patient"}</div>
             <div style={{ fontSize: 12, opacity: 0.78, marginTop: 3 }}>{patient ? `Patient ID #${patient.id}` : "Create a clinical patient record"}</div>
@@ -279,35 +279,39 @@ function PatientModal({ mode, patient, saving, onClose, onSave }) {
           <button onClick={onClose} style={{ width: 34, height: 34, border: "none", borderRadius: 8, background: "rgba(255,255,255,.12)", color: "#fff", cursor: "pointer", fontSize: 20 }}>x</button>
         </div>
 
-        <div style={{ padding: 24, background: "#fafbfd", maxHeight: "calc(90vh - 74px)", overflowY: "auto" }}>
-          {isView ? (
-            <div style={{ display: "grid", gap: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
-                <Avatar patient={patient} size={72} />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: C.navy }}>{getPatientName(patient)}</div>
-                  <div style={{ color: C.text, marginTop: 4 }}>{patient.email || "No email"} / {patient.phone || "No phone"}</div>
+        {isView ? (
+          <>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24, background: "#fafbfd" }}>
+              <div style={{ display: "grid", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
+                  <Avatar patient={patient} size={72} />
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: C.navy }}>{getPatientName(patient)}</div>
+                    <div style={{ color: C.text, marginTop: 4 }}>{patient.email || "No email"} / {patient.phone || "No phone"}</div>
+                  </div>
                 </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
-                <ReadOnly label="Gender" value={patient.gender} />
-                <ReadOnly label="Age" value={calculateAge(patient) !== null ? `${calculateAge(patient)} yrs` : "Not set"} />
-                <ReadOnly label="Date of Birth" value={formatDate(patient.date_of_birth)} />
-                <ReadOnly label="Blood Type" value={patient.blood_type} />
-                <ReadOnly label="Emergency Contact" value={patient.emergency_contact_name} />
-                <ReadOnly label="Emergency Phone" value={patient.emergency_contact_phone} />
-                <ReadOnly label="PhilHealth No." value={patient.philhealth_no} />
-                <ReadOnly label="Senior/PWD ID" value={patient.senior_pwd_id} />
-                <ReadOnly label="Portal Account" value={patient.username || "Not linked"} />
-                <ReadOnly label="Status" value={patient.is_active ? "Active" : "Inactive"} />
-              </div>
-              <ReadOnly label="Address" value={patient.address} />
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <Button onClick={onClose}>Close</Button>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                  <ReadOnly label="Gender" value={patient.gender} />
+                  <ReadOnly label="Age" value={calculateAge(patient) !== null ? `${calculateAge(patient)} yrs` : "Not set"} />
+                  <ReadOnly label="Date of Birth" value={formatDate(patient.date_of_birth)} />
+                  <ReadOnly label="Blood Type" value={patient.blood_type} />
+                  <ReadOnly label="Emergency Contact" value={patient.emergency_contact_name} />
+                  <ReadOnly label="Emergency Phone" value={patient.emergency_contact_phone} />
+                  <ReadOnly label="PhilHealth No." value={patient.philhealth_no} />
+                  <ReadOnly label="Senior/PWD ID" value={patient.senior_pwd_id} />
+                  <ReadOnly label="Portal Account" value={patient.username || "Not linked"} />
+                  <ReadOnly label="Status" value={patient.is_active ? "Active" : "Inactive"} />
+                </div>
+                <ReadOnly label="Address" value={patient.address} />
               </div>
             </div>
-          ) : (
-            <form onSubmit={submit} style={{ display: "grid", gap: 16 }}>
+            <div style={{ flexShrink: 0, display: "flex", justifyContent: "flex-end", padding: "14px 24px", background: "#fff", borderTop: `1px solid ${C.border}` }}>
+              <Button onClick={onClose}>Close</Button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24, background: "#fafbfd", display: "grid", gap: 16, alignContent: "start" }}>
               {error && <div style={{ padding: "12px 14px", borderRadius: 10, background: "#fff2f4", color: C.danger, border: "1px solid #f7c5cb", fontSize: 13, fontWeight: 800 }}>{error}</div>}
 
               <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 14 }}>
@@ -340,14 +344,14 @@ function PatientModal({ mode, patient, saving, onClose, onSave }) {
                   <textarea name="address" value={form.address} onChange={set} rows={3} style={{ ...inputStyle, height: "auto", padding: 12, resize: "vertical" }} />
                 </Field>
               </div>
+            </div>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <Button onClick={onClose} disabled={saving}>Cancel</Button>
-                <Button type="submit" variant="primary" disabled={saving}>{saving ? "Saving..." : isEdit ? "Save Changes" : "Create Patient"}</Button>
-              </div>
-            </form>
-          )}
-        </div>
+            <div style={{ flexShrink: 0, display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 24px", background: "#fff", borderTop: `1px solid ${C.border}` }}>
+              <Button onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={saving}>{saving ? "Saving..." : isEdit ? "Save Changes" : "Create Patient"}</Button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
