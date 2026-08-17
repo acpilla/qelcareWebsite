@@ -443,6 +443,9 @@ export default function ProfileSettings() {
     try {
       const res = await authFetch("/auth/password/change", {
         method: "POST",
+        // Don't let a business 401 (e.g. wrong current password) trigger the global
+        // auth-expiry redirect — we want to show the error and keep the user here.
+        noAuthRedirect: true,
         body: JSON.stringify({
           currentPassword: passwordForm.currentPassword,
           newPassword: passwordForm.newPassword,
@@ -454,6 +457,7 @@ export default function ProfileSettings() {
         throw new Error(data.message || "Password change failed.");
       }
 
+      // Only reached when the current password verified AND the new hash was saved.
       showAlert("success", "Password changed. Please log in again.");
       window.setTimeout(() => logout(), 1200);
     } catch (error) {

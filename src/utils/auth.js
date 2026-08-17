@@ -93,19 +93,24 @@ export const getUserFromToken = () => {
 };
 
 // ── Authenticated fetch helper ────────────────────────────────
+// A 401 normally means the token/session is invalid, so we force a re-login.
+// Callers that pass { noAuthRedirect: true } opt out of that behaviour so an
+// endpoint that legitimately answers 401 for a business reason surfaces the error
+// to the caller instead of silently logging the user out. (The password-change
+// form uses this so a wrong "current password" never kicks the user to /login.)
 export const authFetch = async (url, options = {}) => {
+  const { noAuthRedirect = false, ...fetchOptions } = options;
   const token = getToken();
   const response = await fetch(`${API_URL}${url}`, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
+      ...(fetchOptions.headers || {}),
     },
   });
 
-  // If 401, token expired — force logout
-  if (response.status === 401) {
+  if (response.status === 401 && !noAuthRedirect) {
     localStorage.clear();
     window.location.href = "/login";
     return;

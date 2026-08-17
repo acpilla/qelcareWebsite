@@ -410,6 +410,12 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// After a SUCCESSFUL password change, block another change for this window. Failed
+// attempts (wrong current password, weak/reused new password) do NOT start the
+// cooldown — only a real change bumps users.password_changed_at. This throttles rapid
+// password churn/abuse on top of the IP rate-limit already applied to /auth/password.
+const PASSWORD_CHANGE_COOLDOWN_SECONDS = 120;
+
 const changePassword = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -423,7 +429,7 @@ const changePassword = async (req, res) => {
     await client.query("BEGIN");
 
     const result = await client.query(
-      "SELECT user_id, username, password FROM users WHERE user_id = $1 FOR UPDATE",
+      "SELECT user_id, username, password, password_changed_at FROM users WHERE user_id = $1 FOR UPDATE",
       [req.user.user_id]
     );
 
@@ -433,10 +439,34 @@ const changePassword = async (req, res) => {
     }
 
     const user = result.rows[0];
+
+    // Strictly verify the CURRENT password against the active DB hash BEFORE any
+    // update. On mismatch we roll back (nothing is written) and return 400 — NOT 401.
+    // A 401 here would be read by the client's authFetch as an expired session and
+    // would wrongly clear the token and redirect the user to the login page.
     const valid = await bcrypt.compare(currentPassword, user.password);
     if (!valid) {
       await client.query("ROLLBACK");
-      return res.status(401).json({ success: false, message: "Current password is incorrect" });
+      return res.status(400).json({
+        success: false,
+        code: "INCORRECT_CURRENT_PASSWORD",
+        message: "Incorrect current password",
+      });
+    }
+
+    // Cooldown: refuse a second change too soon after the last successful one.
+    if (user.password_changed_at) {
+      const elapsedMs = Date.now() - new Date(user.password_changed_at).getTime();
+      const remainingSec = Math.ceil((PASSWORD_CHANGE_COOLDOWN_SECONDS * 1000 - elapsedMs) / 1000);
+      if (remainingSec > 0) {
+        await client.query("ROLLBACK");
+        return res.status(429).json({
+          success: false,
+          code: "PASSWORD_CHANGE_COOLDOWN",
+          retry_after: remainingSec,
+          message: `You changed your password recently. Please wait ${remainingSec}s before changing it again.`,
+        });
+      }
     }
 
     if (await passwordHistory.isPasswordReused(client, req.user.user_id, newPassword, user.password)) {
