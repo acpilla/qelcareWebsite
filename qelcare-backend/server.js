@@ -117,6 +117,12 @@ const patientSearchLimiter = rateLimit({
   ...rateLimitOptions,
   windowMs: 15 * 60 * 1000,
   max: 1000,
+  // Exempt the patient self-read: GET /patients/me returns only the caller's own
+  // record (not enumerable), and patient phones share carrier-grade NAT IPs — a
+  // shared per-IP cap could wrongly throttle many unrelated patients. The staff
+  // list/detail routes (the actual enumeration surface) stay limited.
+  skip: (req) =>
+    req.method === "GET" && req.originalUrl.split("?")[0] === "/patients/me",
   message: { success: false, message: "Too many requests. Please slow down." },
 });
 
