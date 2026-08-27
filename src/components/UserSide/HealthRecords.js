@@ -82,7 +82,10 @@ async function callVision(endpoint, source) {
 async function processFileWithVision(file, endpoint, onPage) {
   if (fileType(file) === "pdf") {
     const data = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    // isEvalSupported:false — never use eval()/Function() for font programs, so
+    // rendering stays clean under a CSP that omits 'unsafe-eval'. worker-src still
+    // needs 'self' blob: for the pdf worker itself.
+    const pdf = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
     const pageCount = Math.min(pdf.numPages, MAX_PDF_PAGES);
     const results = [];
     for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {

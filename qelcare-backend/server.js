@@ -10,9 +10,65 @@ const { sweepStaleQueue } = require("./shared/utils/queueSweep");
 
 const app = express();
 
-// Security headers. crossOriginResourcePolicy is relaxed so cross-origin images
-// (Cloudinary, backend-served profile pictures) keep loading in the browser.
-app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+// Behind Railway's proxy/load balancer. Trust exactly ONE hop so:
+//  (a) express-rate-limit reads the real client IP from X-Forwarded-For (not the
+//      proxy's) — otherwise every request shares one key and the limits are wrong,
+//  (b) req.secure / protocol detection is correct for HTTPS.
+// Use `1`, never `true`: `true` lets a client spoof X-Forwarded-For to dodge limits.
+app.set("trust proxy", 1);
+
+// Never advertise the server framework (helmet also hides this; be explicit).
+app.disable("x-powered-by");
+
+// ── Security headers (helmet) ─────────────────────────────────
+// This service is a JSON API; the browser app is the React build on Vercel
+// (which carries its own headers via my-app/vercel.json). We still send a full,
+// explicit header set here so the API scores an A on its own and so any HTML it
+// emits (errors, health checks) is locked down. connect/img sources also cover
+// the backend's own outbound integrations for scanner parity + defence in depth.
+const CLOUDINARY_IMG = "https://res.cloudinary.com";
+const CLOUDINARY_API = "https://api.cloudinary.com";
+const GEMINI_API = "https://generativelanguage.googleapis.com";
+
+app.use(
+  helmet({
+    // Relaxed so a cross-origin <img> (Cloudinary / any backend-served asset) is
+    // not blocked by Cross-Origin-Resource-Policy when embedded from Vercel.
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    // HSTS: 1 year, subdomains, preload — mirrors what the frontend advertises.
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    // Clickjacking: this API is never meant to be framed.
+    frameguard: { action: "deny" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        scriptSrc: ["'self'"],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:", CLOUDINARY_IMG],
+        fontSrc: ["'self'", "https:", "data:"],
+        connectSrc: ["'self'", GEMINI_API, CLOUDINARY_API, CLOUDINARY_IMG],
+        workerSrc: ["'self'", "blob:"],
+      },
+    },
+  })
+);
+
+// Helmet dropped Permissions-Policy years ago; set it ourselves to switch off
+// browser features this API/app never uses (blunts abuse if HTML is ever served).
+app.use((_req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), browsing-topics=()"
+  );
+  next();
+});
 
 // ── Rate limiters ─────────────────────────────────────────────
 // IP-based throttles on the auth surface, layered on top of the per-email OTP
@@ -51,6 +107,19 @@ const displayLimiter = rateLimit({
   message: { success: false, message: "Too many requests. Please slow down." },
 });
 
+// Patient listing/search is already RBAC-gated (staff only), but a stolen staff
+// token could bulk-enumerate records. This is a high anti-abuse backstop, not a
+// UX throttle: the ceiling is deliberately generous so a shared clinic/NAT IP
+// with several receptionists (incl. type-ahead search) is never blocked in normal
+// use. A runaway scraper does thousands/min and trips it; humans never will.
+// Lower `max` if you switch to per-user keying (keyGenerator on req.user).
+const patientSearchLimiter = rateLimit({
+  ...rateLimitOptions,
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  message: { success: false, message: "Too many requests. Please slow down." },
+});
+
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:5173",
@@ -83,6 +152,7 @@ app.use("/auth/otp", otpLimiter);
 app.use("/auth/password", loginLimiter);
 app.use("/auth/patient", authLimiter);
 app.use("/queue/display", displayLimiter);
+app.use("/patients", patientSearchLimiter);
 
 app.use("/auth/patient", require("./features/auth/routes/patientRegistrationRoutes"));
 app.use("/auth", require("./features/auth/routes/authRoutes"));

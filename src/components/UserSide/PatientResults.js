@@ -279,7 +279,9 @@ export default function PatientResults() {
         const prefix = files.length > 1 ? `File ${fi + 1}` : "";
         if (fileType(f) === "pdf") {
           const data = await f.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data }).promise;
+          // isEvalSupported:false — never use eval()/Function() for font programs,
+          // so rendering stays clean under a CSP that omits 'unsafe-eval'.
+          const pdf = await pdfjsLib.getDocument({ data, isEvalSupported: false }).promise;
           const pageCount = Math.min(pdf.numPages, MAX_PDF_PAGES);
           for (let pageNo = 1; pageNo <= pageCount; pageNo += 1) {
             setMessage(files.length > 1 ? `AI Vision reading file ${fi + 1} of ${files.length} (page ${pageNo}/${pageCount}).` : `AI Vision processing PDF page ${pageNo} of ${pageCount}.`);
