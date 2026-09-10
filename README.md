@@ -65,7 +65,7 @@ The backend follows a **feature-based (vertical-slice) structure** — each doma
 <summary><strong>Project structure</strong></summary>
 
 ```
-qelcareWebsite/
+QELCare-Website-Multispecialty-Clinic-Management-System//
 ├── public/                     # CRA static assets
 ├── src/                        # React frontend
 │   ├── components/             # Role-based UI: AdminFeatures, DoctorSide, Nurse,
@@ -103,8 +103,8 @@ A companion **patient-only mobile app** (built with Capacitor) wraps the patient
 
 ### 1. Clone and install
 ```bash
-git clone https://github.com/acpilla/qelcareWebsite.git
-cd qelcareWebsite
+git clone https://github.com/acpilla/QELCare-Website-Multispecialty-Clinic-Management-System.git
+cd QELCare-Website-Multispecialty-Clinic-Management-System
 
 # Frontend deps (repo root)
 npm install
@@ -205,4 +205,4 @@ No open-source license has been declared for this repository, so all rights are 
 
 ## Contact
 
-Built and maintained by **[@acpilla](https://github.com/acpilla)** · [Repository](https://github.com/acpilla/qelcareWebsite)
+Built and maintained by **[@acpilla](https://github.com/acpilla)** · [Repository](https://github.com/QELCare-Website-Multispecialty-Clinic-Management-System/)
